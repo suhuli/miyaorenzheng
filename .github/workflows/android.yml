@@ -21,6 +21,9 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install 'cryptography>=44,<51' && python -m unittest discover -s tools/tests -v
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.1'
       - run: chmod +x gradlew && ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
