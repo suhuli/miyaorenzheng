@@ -1,0 +1,23 @@
+name: Community APK
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.1'
+      - run: chmod +x gradlew && ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KeyAttestation-Community-debug
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/reports/tests/testDebugUnitTest/
