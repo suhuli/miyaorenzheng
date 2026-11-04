@@ -102,4 +102,27 @@ public class DashboardSmokeTest {
             var pending=DashboardActivity.class.getDeclaredField("refreshPending");pending.setAccessible(true);assertTrue(pending.getBoolean(c.get()));
         }
     }
+
+    private void configCard(DashboardActivity activity, com.larus.nova.attestation.ProvisioningFields fields, boolean absent) throws Exception {
+        com.larus.nova.attestation.ProvisioningInfo info=null;
+        if(fields!=null){var ctor=com.larus.nova.attestation.ProvisioningInfo.class.getDeclaredConstructor(com.larus.nova.attestation.ProvisioningFields.class);ctor.setAccessible(true);info=ctor.newInstance(fields);}
+        var method=DashboardActivity.class.getDeclaredMethod("provisioningCard",java.util.List.class);method.setAccessible(true);
+        method.invoke(activity,absent?java.util.List.of():java.util.List.of(new kotlin.Pair<Integer,com.larus.nova.attestation.ProvisioningInfo>(2,info)));
+    }
+    @Test public void homeConfigCardShowsMissingExtensionHonestly() throws Exception {
+        try(var c=activity()){configCard(c.get(),null,true);var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"配置扩展"));assertTrue(containsText(root,"未发现配置扩展"));}
+    }
+    @Test public void homeConfigCardDistinguishesParseFailure() throws Exception {
+        try(var c=activity()){configCard(c.get(),null,false);assertTrue(containsText(c.get().getWindow().getDecorView(),"扩展存在，解析失败"));}
+    }
+    @Test public void homeConfigCardShowsFieldsAndLostFlag() throws Exception {
+        try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.certsIssued=123L;fields.validatedAttestedEntity="TEE";fields.lostDevice=true;fields.manufacturer="Vendor";fields.unknown.put("99","future");configCard(c.get(),fields,false);
+            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"123"));assertTrue(containsText(root,"TEE"));assertTrue(containsText(root,"标记为遗失设备"));assertTrue(containsText(root,"Vendor"));assertTrue(containsText(root,"1 项"));assertTrue(containsText(root,"查看第 2 张配置详情"));}
+    }
+    @Test public void homeConfigCardDoesNotTreatMissingLostFlagAsFalse() throws Exception {
+        try(var c=activity()){configCard(c.get(),new com.larus.nova.attestation.ProvisioningFields(),false);var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"未提供"));assertFalse(containsText(root,"未标记（非实时）"));}
+    }
+    @Test public void homeConfigCardExplicitFalseIsNotRealTimeSafetyClaim() throws Exception {
+        try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.lostDevice=false;configCard(c.get(),fields,false);assertTrue(containsText(c.get().getWindow().getDecorView(),"未标记（非实时）"));}
+    }
 }
