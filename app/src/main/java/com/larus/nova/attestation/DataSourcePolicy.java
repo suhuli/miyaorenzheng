@@ -11,6 +11,6 @@ public final class DataSourcePolicy {
     }
     public static String label(String value) {
         return MIRROR_FIRST.equals(normalize(value))
-            ? "jsDelivr → Google 官方 → 本地缓存" : "Google 官方 → jsDelivr → 本地缓存";
+            ? "仓库镜像 → Google 官方 → 本地缓存" : "Google 官方 → 仓库镜像 → 本地缓存";
     }
 }

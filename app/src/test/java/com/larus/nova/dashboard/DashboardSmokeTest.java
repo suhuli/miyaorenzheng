@@ -83,7 +83,7 @@ public class DashboardSmokeTest {
         }
         try(var c=activity()) {
             var root=c.get().getWindow().getDecorView();find(root,BottomNavigationView.class).setSelectedItemId(4);
-            assertTrue(((TextView)priorityButton(root)).getText().toString().contains("jsDelivr → Google 官方"));
+            assertTrue(((TextView)priorityButton(root)).getText().toString().contains("仓库镜像 → Google 官方"));
         }
     }
     @Test public void cancelPriorityDialogDoesNotChangeDefault() {

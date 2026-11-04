@@ -14,7 +14,7 @@ public class MirrorTrustTest {
         String pem="-----BEGIN CERTIFICATE-----\n"+java.util.Base64.getMimeEncoder().encodeToString(cert)+"\n-----END CERTIFICATE-----\n";
         var app=RuntimeEnvironment.getApplication();
         var accept=OfficialData.class.getDeclaredMethod("accept",android.content.Context.class,String.class,String.class,long.class,String.class);accept.setAccessible(true);
-        accept.invoke(null,app,new JSONArray().put(pem).toString(),"{\"entries\":{}}",System.currentTimeMillis(),"仓库镜像 · jsDelivr");
+        accept.invoke(null,app,new JSONArray().put(pem).toString(),"{\"entries\":{}}",System.currentTimeMillis(),"仓库镜像");
         var c=(X509Certificate)CertificateFactory.getInstance("X.509").generateCertificate(new java.io.ByteArrayInputStream(cert));
         org.junit.Assert.assertTrue(OfficialData.matches(c.getPublicKey().getEncoded()));
         org.junit.Assert.assertEquals(1,OfficialData.rootCount());

@@ -47,5 +47,3 @@ jobs:
           AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$AUTH"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/data
-      - name: Refresh CDN manifest (best effort)
-        run: curl --fail --retry 2 --max-time 30 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@data/manifest.json" || true

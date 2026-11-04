@@ -54,7 +54,7 @@ public class OfficialPriorityTest {
     }
     @Test public void officialReplacesMirrorEvenWhenMirrorTimestampIsNewer() throws Exception {
         String officialRoots=roots();
-        accept(syntheticRoot(),status("bb"),System.currentTimeMillis()+60_000,"仓库镜像 · jsDelivr");
+        accept(syntheticRoot(),status("bb"),System.currentTimeMillis()+60_000,"仓库镜像");
         assertTrue(refresh(url->url.equals(OfficialData.ROOT_URL)?officialRoots:status("aa")));
         assertEquals(new JSONArray(officialRoots).length(),OfficialData.rootCount());
         assertEquals("Google 官方直连",OfficialData.source());
@@ -70,7 +70,7 @@ public class OfficialPriorityTest {
     @Test public void officialFailureUsesMirrorAndPreservesOfficialFetchTime() throws Exception {
         long time=System.currentTimeMillis()-5000;var d=mirror(roots(),status("ab"),time);
         assertTrue(refresh(d));assertEquals(OfficialData.ROOT_URL,calls.get(0));assertEquals(OfficialData.MIRROR_MANIFEST,calls.get(1));
-        assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.source().contains("jsDelivr"));
+        assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.source().equals("仓库镜像"));
         assertTrue(OfficialData.error().contains("官方不可用"));
     }
     @Test public void mirrorRemainsFullyTrustedForRootUpdates() throws Exception {
@@ -81,7 +81,7 @@ public class OfficialPriorityTest {
         var fallback=mirror(roots(),status("aa"),System.currentTimeMillis()-1000);
         assertTrue(refresh(url->{if(url.equals(OfficialData.ROOT_URL))return "[]";
             if(url.equals(OfficialData.STATUS_URL))return status("bb");return fallback.get(url);}));
-        assertTrue(OfficialData.source().contains("jsDelivr"));assertFalse(OfficialData.entries().has("bb"));
+        assertTrue(OfficialData.source().equals("仓库镜像"));assertFalse(OfficialData.entries().has("bb"));
     }
     @Test public void allNetworkFailurePreservesCacheAndAge() throws Exception {
         long time=System.currentTimeMillis()-10_000;accept(roots(),status("ac"),time,"Google 官方直连");
@@ -111,11 +111,11 @@ public class OfficialPriorityTest {
     @Test public void mirrorPreferenceUsesMirrorAndDoesNotContactGoogleOnSuccess() throws Exception {
         mirrorFirst();assertTrue(refresh(mirror(roots(),status("aa"),System.currentTimeMillis()-1000)));
         assertEquals(OfficialData.MIRROR_MANIFEST,calls.get(0));assertEquals(2,calls.size());
-        assertFalse(calls.contains(OfficialData.ROOT_URL));assertTrue(OfficialData.source().contains("jsDelivr"));
+        assertFalse(calls.contains(OfficialData.ROOT_URL));assertTrue(OfficialData.source().equals("仓库镜像"));
         assertEquals("",OfficialData.error());
     }
     @Test public void mirrorFailureFallsBackToOfficialAndReplacesAllData() throws Exception {
-        String r=roots();accept(syntheticRoot(),status("bb"),System.currentTimeMillis()+1000,"仓库镜像 · jsDelivr");
+        String r=roots();accept(syntheticRoot(),status("bb"),System.currentTimeMillis()+1000,"仓库镜像");
         mirrorFirst();assertTrue(refresh(url->{if(url.equals(OfficialData.MIRROR_MANIFEST))throw new IOException("offline");
             return url.equals(OfficialData.ROOT_URL)?r:status("aa");}));
         assertEquals(List.of(OfficialData.MIRROR_MANIFEST,OfficialData.ROOT_URL,OfficialData.STATUS_URL),calls);
@@ -148,13 +148,13 @@ public class OfficialPriorityTest {
         String r=roots();long time=System.currentTimeMillis()-3600000;
         accept(r,status("bb"),System.currentTimeMillis(),"Google 官方直连");mirrorFirst();
         assertTrue(refresh(mirror(r,status("aa"),time)));
-        assertTrue(OfficialData.source().contains("jsDelivr"));assertEquals(time,OfficialData.fetchedAt());
+        assertTrue(OfficialData.source().equals("仓库镜像"));assertEquals(time,OfficialData.fetchedAt());
         assertTrue(OfficialData.entries().has("aa"));assertFalse(OfficialData.entries().has("bb"));
         assertFalse(calls.contains(OfficialData.ROOT_URL));
     }
     @Test public void preferredMirrorStillCannotRollBackPreviouslyAcceptedMirrorVersion() throws Exception {
         String r=roots();long time=System.currentTimeMillis()-1000;
-        accept(r,status("bb"),time,"仓库镜像 · jsDelivr");mirrorFirst();
+        accept(r,status("bb"),time,"仓库镜像");mirrorFirst();
         assertFalse(refresh(mirror(r,status("aa"),time-1000)));
         assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.entries().has("bb"));
     }
@@ -182,5 +182,30 @@ public class OfficialPriorityTest {
         OfficialData.initialize(RuntimeEnvironment.getApplication());mirrorFirst();calls.clear();
         assertFalse(refresh(mirror(r,status("cc"),time-1000)));
         assertEquals("Google 官方直连",OfficialData.source());assertTrue(OfficialData.entries().has("bb"));
+    }
+    @Test public void repositoryEndpointsAndRequestsAreDirectRawOnly() throws Exception {
+        assertEquals("https://raw.githubusercontent.com/suhuli/miyaorenzheng/data/",OfficialData.MIRROR_BASE);
+        assertEquals(OfficialData.MIRROR_BASE+"manifest.json",OfficialData.MIRROR_MANIFEST);
+        mirrorFirst();assertTrue(refresh(mirror(roots(),status("aa"),System.currentTimeMillis()-1000)));
+        assertEquals(2,calls.size());
+        for(String url:calls)assertTrue(url.startsWith(OfficialData.MIRROR_BASE));
+        assertEquals("仓库镜像",OfficialData.source());
+    }
+    @Test public void legacyProviderCacheRefetchesDirectAtSameVersion() throws Exception {
+        long time=System.currentTimeMillis()-1000;
+        accept(roots(),status("aa"),time,"仓库镜像 · jsDelivr");
+        var f=OfficialData.class.getDeclaredField("current");f.setAccessible(true);f.set(null,null);
+        OfficialData.initialize(RuntimeEnvironment.getApplication());
+        assertEquals("仓库镜像（旧版缓存）",OfficialData.source());assertEquals(time,OfficialData.fetchedAt());
+        mirrorFirst();assertTrue(refresh(mirror(roots(),status("aa"),time)));
+        assertEquals(2,calls.size());assertEquals("仓库镜像",OfficialData.source());assertEquals(time,OfficialData.fetchedAt());
+    }
+    @Test public void legacyProviderWatermarkStillRejectsOlderDirectMirror() throws Exception {
+        long time=System.currentTimeMillis()-1000;
+        accept(roots(),status("aa"),time,"仓库镜像 · jsDelivr");
+        var f=OfficialData.class.getDeclaredField("current");f.setAccessible(true);f.set(null,null);
+        OfficialData.initialize(RuntimeEnvironment.getApplication());mirrorFirst();
+        assertFalse(refresh(mirror(roots(),status("bb"),time-1000)));
+        assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.entries().has("aa"));
     }
 }

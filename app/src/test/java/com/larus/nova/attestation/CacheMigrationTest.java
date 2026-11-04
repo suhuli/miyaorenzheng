@@ -34,4 +34,13 @@ public class CacheMigrationTest {
         long time=System.currentTimeMillis()-10000;write("trust-store.json",cache(time));write("official-data.json","{}");reload();
         assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.entries().has("ab"));
     }
+    @Test public void legacyProviderWithoutExplicitWatermarkPreservesVersionAndPreference()throws Exception {
+        long time=System.currentTimeMillis()-10000;
+        var app=RuntimeEnvironment.getApplication();app.getSharedPreferences("dashboard",0).edit().putString(DataSourcePolicy.KEY,DataSourcePolicy.MIRROR_FIRST).commit();
+        var old=new JSONObject(cache(time)).put("source","仓库镜像 · jsDelivr");
+        write("trust-store.json",old.toString());reload();
+        assertEquals(time,OfficialData.fetchedAt());assertEquals("仓库镜像（旧版缓存）",OfficialData.source());
+        var f=OfficialData.class.getDeclaredField("latestMirrorFetchedAt");f.setAccessible(true);assertEquals(time,f.getLong(null));
+        assertEquals(DataSourcePolicy.MIRROR_FIRST,OfficialData.priority(app));assertTrue(OfficialData.entries().has("ab"));
+    }
 }
