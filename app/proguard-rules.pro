@@ -22,3 +22,8 @@
 -keep class com.google.android.material.theme.MaterialComponentsViewInflater {
     <init>();
 }
+
+# Workers are instantiated by WorkManager through the two-argument constructor.
+-keep,allowoptimization class * extends androidx.work.ListenableWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}

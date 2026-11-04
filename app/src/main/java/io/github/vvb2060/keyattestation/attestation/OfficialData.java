@@ -11,7 +11,7 @@ import java.util.*;
 import javax.net.ssl.HttpsURLConnection;
 import io.github.vvb2060.keyattestation.R;
 
-/** Fixed trusted repository mirror first, official HTTPS fallback. No device uploads. */
+/** Official HTTPS first, trusted repository mirror second, local cache last. No device uploads. */
 public final class OfficialData {
     public static final String MIRROR_BASE = "https://cdn.jsdelivr.net/gh/suhuli/miyaorenzheng@data/";
     public static final String MIRROR_MANIFEST = MIRROR_BASE + "manifest.json";
@@ -83,6 +83,7 @@ public final class OfficialData {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(6000); c.setReadTimeout(10000);
         c.setInstanceFollowRedirects(false);
+        c.setUseCaches(false);
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Cache-Control", "no-cache");
         try {
@@ -90,37 +91,51 @@ public final class OfficialData {
             try (InputStream in = c.getInputStream()) { return read(in); }
         } finally { c.disconnect(); }
     }
+    @FunctionalInterface
+    interface Downloader { String get(String url) throws IOException; }
+
     public static synchronized boolean refresh(Context context, boolean force) {
+        return refresh(context, force, OfficialData::download);
+    }
+    // Package-private transport seam permits deterministic fallback/authority regression tests.
+    static synchronized boolean refresh(Context context, boolean force, Downloader downloader) {
         initialize(context);
-        String mirrorError;
+        String officialError;
         try {
-            MirrorManifest manifest=MirrorManifest.parse(download(MIRROR_MANIFEST),System.currentTimeMillis());
-            if(manifest.fetchedAt()<current.fetchedAt()) {
-                // Never replace a newer local official/mirror snapshot with an older CDN response.
-                if(isFresh()) {lastError="CDN 返回较旧版本，继续使用较新的本地快照";return true;}
+            String roots = downloader.get(ROOT_URL);
+            String status = downloader.get(STATUS_URL);
+            // A complete valid official response is authoritative, regardless of mirror timestamps.
+            // accept() replaces BOTH root set and revocation table atomically; never union stale data.
+            accept(context, roots, status, System.currentTimeMillis(), "Google 官方直连");
+            lastError = "";
+            return true; // Do not consult the mirror after official success.
+        } catch (Exception e) {
+            officialError = e.getClass().getSimpleName() + ": " + e.getMessage();
+        }
+        try {
+            long now = System.currentTimeMillis();
+            MirrorManifest manifest = MirrorManifest.parse(downloader.get(MIRROR_MANIFEST), now);
+            if (now - manifest.fetchedAt() > MAX_AGE || manifest.fetchedAt() > now)
+                throw new IOException("Mirror snapshot is stale or from the future");
+            if (manifest.fetchedAt() < current.fetchedAt())
                 throw new IOException("CDN snapshot older than local data");
+            if (manifest.fetchedAt() != current.fetchedAt() || !current.source().contains("jsDelivr")) {
+                String body = downloader.get(MIRROR_BASE + manifest.path());
+                manifest.check(body);
+                JSONObject bundle = new JSONObject(body);
+                accept(context, bundle.getJSONArray("roots").toString(),
+                    bundle.getJSONObject("status").toString(), manifest.fetchedAt(), "仓库镜像 · jsDelivr");
             }
-            if(manifest.fetchedAt()==current.fetchedAt() && current.source().contains("jsDelivr")) {
-                if(isFresh()){lastError="";return true;}
-                throw new IOException("Mirror snapshot is older than 24 hours");
-            }
-            String body=download(MIRROR_BASE+manifest.path());manifest.check(body);
-            JSONObject bundle=new JSONObject(body);
-            accept(context,bundle.getJSONArray("roots").toString(),bundle.getJSONObject("status").toString(),
-                manifest.fetchedAt(),"仓库镜像 · jsDelivr");
-            if(isFresh()){lastError="";return true;}
-            throw new IOException("Mirror snapshot is older than 24 hours");
-        } catch(Exception e) {mirrorError=e.getClass().getSimpleName()+": "+e.getMessage();}
-        try {
-            String roots=download(ROOT_URL),status=download(STATUS_URL);
-            accept(context,roots,status,System.currentTimeMillis(),"Google 官方直连");
-            lastError="镜像不可用，已回退官方："+mirrorError;return true;
-        } catch(Exception e) {
-            lastError="镜像："+mirrorError+"\n官方："+e.getClass().getSimpleName()+": "+e.getMessage();return false;
+            lastError = "官方不可用，已使用 jsDelivr：" + officialError;
+            return true;
+        } catch (Exception e) {
+            // Neither path succeeded. Keep the last validated local snapshot and its original age.
+            lastError = "官方：" + officialError + "\n镜像：" + e.getClass().getSimpleName() + ": " + e.getMessage();
+            return false;
         }
     }
     private static void accept(Context context,String roots,String status,long time,String source) throws Exception {
-        // Trust all root additions/removals in the configured repository, as explicitly selected by owner.
+        // Both official and explicitly trusted repository updates replace complete datasets.
         Snapshot next=parse(roots,status,time,source);
         Set<String> added=new HashSet<>(next.keys());added.removeAll(current.keys());
         Set<String> removed=new HashSet<>(current.keys());removed.removeAll(next.keys());
@@ -180,7 +195,7 @@ public final class OfficialData {
     public static JSONObject entries() { return current.entries(); }
     public static String describe() {
         Snapshot s = current;
-        return "Mirror: " + MIRROR_MANIFEST + "\n信任模式：完全信任指定仓库；镜像无签名，可自动更新根公钥集合\nRoots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
+        return "顺序：Google 官方 → jsDelivr → 本地缓存\nMirror: " + MIRROR_MANIFEST + "\n信任模式：完全信任指定仓库；镜像无签名，可自动更新根公钥集合\nRoots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
             + "\n官方抓取时间: " + (s.fetchedAt() == 0 ? "Bundled; not online-verified" : new Date(s.fetchedAt()))
             + "\nFresh (<24h): " + isFresh() + "\nRoot keys: " + s.keys().size()
             + "\n更新差异：" + lastChange

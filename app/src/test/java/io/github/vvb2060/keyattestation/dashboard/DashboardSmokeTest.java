@@ -41,7 +41,7 @@ public class DashboardSmokeTest {
         return false;
     }
     @Test public void dashboardLaunchesWithFourSections() {
-        try(var c=activity()) {var root=c.get().getWindow().getDecorView();var nav=find(root,BottomNavigationView.class);assertNotNull(nav);assertEquals(4,nav.getMenu().size());assertTrue(containsText(root,"密钥认证"));}
+        try(var c=activity()) {var root=c.get().getWindow().getDecorView();var nav=find(root,BottomNavigationView.class);assertNotNull(nav);assertEquals(4,nav.getMenu().size());assertTrue(containsText(root,"密钥认证增强版"));assertEquals("com.larus.nova",c.get().getPackageName());assertEquals("密钥认证增强版",c.get().getString(R.string.app_name));}
     }
     @Test public void allSectionsNavigateWithoutHardware() {
         try(var c=activity()) {var root=c.get().getWindow().getDecorView();var nav=find(root,BottomNavigationView.class);

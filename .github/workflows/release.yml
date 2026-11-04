@@ -1,4 +1,4 @@
-name: Signed release (owner configured)
+name: Production signed APK
 on:
   workflow_dispatch:
 permissions:
@@ -35,10 +35,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: chmod +x gradlew && ./gradlew :app:testDebugUnitTest :app:assembleRelease --no-daemon
+        run: chmod +x gradlew && ./gradlew :app:testReleaseUnitTest :app:assembleRelease --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: owner-signed-release
+          name: Nova-production-release
           path: app/build/outputs/apk/release/*.apk
       - name: Remove private signing file
         if: always()

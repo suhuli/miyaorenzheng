@@ -23,13 +23,13 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 35
-        versionCode = 220
-        versionName = '2.2.0-community'
-        applicationIdSuffix = '.community.fix'
+        versionCode = 230
+        versionName = '2.3.0'
+        applicationId = 'com.larus.nova'
         resourceConfigurations += ['en', 'zh-rCN', 'zh-rTW', 'pt-rBR']
         optimization {
             keepRules {
-                ignoreFromAllExternalDependencies true
+                ignoreFromAllExternalDependencies false
             }
         }
     }
@@ -60,6 +60,7 @@ android {
             minifyEnabled true
             shrinkResources true
             vcsInfo.include false
+            debuggable false
             signingConfig signingConfigs.production
             proguardFiles 'proguard-rules.pro'
         }
@@ -167,5 +168,16 @@ abstract class ClassVisitorFactory implements AsmClassVisitorFactory<Instrumenta
 
     boolean isInstrumentable(ClassData classData) {
         return classData.className.startsWith("io.github.vvb2060.keyattestation.keystore.")
+    }
+}
+
+// Never emit an unsigned production APK or silently reuse a debug signing key.
+tasks.configureEach { task ->
+    if (task.name in ['validateSigningRelease', 'packageRelease', 'bundleRelease']) {
+        task.doFirst {
+            ['KEYSTORE_PATH', 'KEYSTORE_PASSWORD', 'KEY_ALIAS', 'KEY_PASSWORD'].each { key ->
+                if (!System.getenv(key)) throw new GradleException("Missing production signing environment: " + key)
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-name: Community APK
+name: App validation
 on:
   push:
     branches: [main]
@@ -26,10 +26,9 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.1'
-      - run: chmod +x gradlew && ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
+      - run: chmod +x gradlew && ./gradlew :app:testReleaseUnitTest --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: KeyAttestation-Community-debug
+          name: unit-test-report
           path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/tests/testReleaseUnitTest/

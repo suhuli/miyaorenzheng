@@ -1,4 +1,4 @@
-# 密钥认证 · Key Attestation Community 2.2
+# 密钥认证增强版 2.3.0
 
 原生 Android 密钥证明诊断工具。首页直接显示证书正常、异常或待确认及原因；保留证书链、本地历史、RKP 识别和导出。
 
@@ -6,11 +6,20 @@
 
 基于 [vvb2060/KeyAttestation](https://github.com/vvb2060/KeyAttestation) 的非官方社区修改版，上游基线 `b223a9be86cb2a747625d8e47f3456646d55bd7a`。保留上游作者、版权和 Apache-2.0 许可，见 LICENSE、README.upstream.md。不是 Google 或原作者的官方发行版。
 
-## 2.2 更新
+## 2.3.0 正式版
+
+- 应用名：密钥认证增强版；包名：`com.larus.nova`；版本：2.3.0 / 230。
+- 独立正式生产密钥签名、release 构建、不可调试，不再发布 debug APK；新包名独立安装，不覆盖旧包名的私有历史。
+- **Google 官方 → jsDelivr → 本地缓存**。官方 root/status 均获取且验证成功后完整替换本地数据，立即采用官方结果；不再查询镜像，也不与过时数据合并。
+- 官方失败才访问镜像；镜像失败保留缓存。镜像完全信任仓库的既有决策保留。
+- 后续升级必须使用同一生产密钥。密钥私下交付，公开源码与发布附件均不含私钥/密码。
+- 构建见 SIGNING.md，更新和信任模式见 MIRROR.md。
+
+## 2.2 历史更新（数据优先级已在 2.3 反转）
 
 - 首页改为醒目的绿色/红色/黄色结果卡，区分正常、真实异常和数据不足/兼容状态；不是“手机绝对安全”承诺。
 - 删除首页口号、英文品牌行、各页说明副标题和重复说明卡。详细解释在证书/设置详情中按需查看。
-- 官方数据采用 **jsDelivr 仓库镜像优先**。启动或返回前台检查清单，有新版本才下载；失败尝试 Google，最后保留本地缓存。
+- 2.2 曾采用 jsDelivr 优先；2.3 改为 Google 官方优先，失败才查镜像清单，最后保留缓存。
 - **完全信任仓库，不做镜像签名、不限制仓库新增根**。SHA-256 只检查传输完整性，不是签名。详情见 MIRROR.md。
 - GitHub 每 3 小时抓取官方 root/status，两份都验证成功才更新 data 分支。清单使用官方抓取时间，客户端不会把旧数据伪装成刚更新。
 
@@ -21,7 +30,7 @@
 - **记录**：本机最多 30 次摘要、任意两次对比、停止记录/一键清空；正常轮换不当成泄露。摘要仍含可关联指纹。
 - **设置**：固定 Google HTTPS 官方数据更新、差异和错误、离线数据包导入导出、隐私、临期通知、浅/深色与跟随系统。
 
-2.2 镜像机制见 **MIRROR.md**，2.1 功能详见 **FEATURE-2.1.md**（历史版本说明）。2.0.1 的双完整链误判修复继续保留，见 FIX-2.0.1.md。
+当前镜像机制见 **MIRROR.md**，2.1 功能详见 **FEATURE-2.1.md**（历史版本说明）。2.0.1 的双完整链误判修复继续保留，见 FIX-2.0.1.md。
 
 ## 数据与判断依据
 
@@ -39,7 +48,7 @@ RKP 识别来自证书配置扩展，并非“远程读取私钥”。支持 cer
 ## 安装与权限
 
 - Android 7.0 / API 24 以上。
-- 测试版包名：`io.github.vvb2060.keyattestation.community.fix`，与 2.0.1 保持一致；须用同一签名才能覆盖升级。
+- 正式版包名：`com.larus.nova`；与旧测试包名不同，独立安装。未来正式版同包名、同生产签名才能覆盖升级。
 - INTERNET 用于 jsDelivr/Google 公开信任数据更新；原有主动 RKP 高级工具需确认后向所选服务提交配置数据。
 - 临期通知默认关闭，Android 13+ 开启时请求通知权限。WorkManager 约每 12 小时检查上次本机 RKP 快照，受节电调度限制，不联网断言当前证书状态。
 - 历史/报告不自动上传；完整导出先提示，默认提供白名单脱敏报告。系统自动备份关闭。
@@ -50,17 +59,19 @@ JDK 21、Android SDK platform 35、Build Tools 35.0.1。设置 ANDROID_HOME 或 
 
 ```sh
 chmod +x gradlew
-./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
+./gradlew :app:testReleaseUnitTest
+# 设置 SIGNING.md 中的签名环境后生成正式安装包
+./gradlew :app:assembleRelease --no-daemon
 ```
 
 低内存环境建议分步（避免 Kotlin 编译器与 Robolectric 争用内存）：
 
 ```sh
-./gradlew :app:assembleDebug :app:compileDebugUnitTestJavaWithJavac --no-daemon
-./gradlew :app:testDebugUnitTest --no-daemon '-Dorg.gradle.jvmargs=-Xmx320m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=2'
+./gradlew :app:assembleRelease :app:compileReleaseUnitTestJavaWithJavac --no-daemon
+./gradlew :app:testReleaseUnitTest --no-daemon '-Dorg.gradle.jvmargs=-Xmx320m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=2'
 ```
 
-输出 `app/build/outputs/apk/debug/app-debug.apk`。完整测试记录和真机待验收清单见 TESTING.md。Python 镜像测试运行 `python -m unittest discover -s tools/tests -v`（需 cryptography）。
+输出 `app/build/outputs/apk/release/app-release.apk`。完整测试记录和真机待验收清单见 TESTING.md。Python 镜像测试运行 `python -m unittest discover -s tools/tests -v`（需 cryptography）。
 
 快照独立检查：
 

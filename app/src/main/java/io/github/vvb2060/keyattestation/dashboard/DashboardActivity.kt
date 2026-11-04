@@ -100,9 +100,9 @@ open class DashboardActivity : AppCompatActivity() {
         }
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(22), dp(16), dp(22), dp(12)) }
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        brand.addView(text("密钥认证", 23, true))
+        brand.addView(text(getString(R.string.app_name), 23, true))
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(text("2.2", 12, true, R.color.dash_accent).apply {
+        top.addView(text(BuildConfig.VERSION_NAME, 12, true, R.color.dash_accent).apply {
             setPadding(dp(12), dp(8), dp(12), dp(8)); background = rounded(R.color.dash_accent_soft, 20)
             contentDescription = "本机诊断，不是服务端设备完整性认证"
         })
@@ -394,7 +394,7 @@ open class DashboardActivity : AppCompatActivity() {
         button(data, "导入离线数据包", true) {
             confirm("离线导入限制", "只接受根集合与本机已知官方根一致的数据包。撤销条目保守合并，不能删除已有条目；导入不等于官方在线确认。") { importData.launch("*/*") }
         }
-        toggle(data, "启动时检查更新", "优先 jsDelivr 镜像，失败尝试 Google，再回退本地缓存。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
+        toggle(data, "启动时检查更新", "优先 Google 官方，失败尝试 jsDelivr，再回退本地缓存。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
         val privacy = card("隐私与提醒")
         toggle(privacy, "保留本地历史", "最多 30 条，可随时关闭或清空。", prefs.getBoolean("history", true)) { prefs.edit().putBoolean("history", it).apply() }
         toggle(privacy, "证书临期通知", "上次记录的 RKP 证书在 7 天内到期时提醒。", prefs.getBoolean("reminders", false)) {
@@ -432,7 +432,7 @@ open class DashboardActivity : AppCompatActivity() {
         val data = current ?: return toast("请先完成一次检测")
         fun save() {
             pendingText = buildString {
-                append("密钥认证 ${BuildConfig.VERSION_NAME}\n${date(System.currentTimeMillis())}\n模式：${if (redacted) "脱敏摘要" else "完整诊断"}\n")
+                append("${getString(R.string.app_name)} ${BuildConfig.VERSION_NAME}\n${date(System.currentTimeMillis())}\n模式：${if (redacted) "脱敏摘要" else "完整诊断"}\n")
                 append("本机诊断，不是服务端挑战验证或设备完整性保证。\n")
                 if (redacted) {
                     val safe = snapshot(data)

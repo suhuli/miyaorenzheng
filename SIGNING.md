@@ -1,38 +1,26 @@
-# 正式签名与后续升级
+# 2.3.0 正式签名
 
-## 本次交付
+本版为正式 `release` 构建：包名 `com.larus.nova`，应用名「密钥认证增强版」，版本 2.3.0 / 230；不附加 community/debug 后缀，`debuggable=false`。开启代码压缩和资源缩减；保留依赖库 consumer keep rules 与 Worker 反射构造规则。
 
-当前安装包仍为测试签名，包名保持 `io.github.vvb2060.keyattestation.community.fix`。
-构建环境保留了 2.0.1 的测试密钥；交付前会比对两版签名证书摘要，只有一致才声称可覆盖升级。
-测试私钥不加入源码、ZIP 或 Git 仓库。GitHub 临时构建默认的 debug 私钥每个 Runner 不同，不保证互相覆盖升级。
+所有者已选择新建独立生产密钥。使用 RSA-3072 / SHA256withRSA、PKCS12、别名 `nova-release`；不是 Android debug 密钥。私钥和随机生成的密码单独私下交付，不进入 Git/GitHub 发布、网盘或公开源码。
 
-## 正式发行需要由仓库所有者保管私钥
+请立即下载并离线备份 `Nova-Release-Signing-PRIVATE.zip`，其中含私钥、密码与恢复说明。它能签署后续所有版本，必须私密保存。丢失密钥可能导致以后无法正常覆盖升级；泄露时他人可能伪造相同签名的版本。ZIP 内含密码，本身不是加密保险箱。
 
-本版 release 已移除“沿用 debug 签名”的危险默认值。没有正式密钥时不会生成伪装为正式签名的安装包。
-如需从测试签名迁移为生产签名，Android 一般不能直接同包覆盖安装；应先导出所需公开数据后卸载测试版，或为正式发行使用独立 applicationId。不要承诺绕过 Android 签名校验。
+新包名与旧版不同，正式版会独立安装，不会自动继承旧版私有历史记录。后续正式版必须保持同一包名、同一生产签名，递增 versionCode。
 
-创建自己的签名密钥（在你自己的安全机器上执行）：
+## 本地构建
 
-```sh
-keytool -genkeypair -v -keystore release.keystore -alias release -keyalg RSA -keysize 3072 -validity 10000
-```
+签名参数只从环境变量读取，不写入 Gradle 文件或仓库：
 
-保管密钥与恢复副本，不要通过聊天发送。构建参数只从环境变量读取：
+- KEYSTORE_PATH：nova-release.p12 的绝对路径
+- KEYSTORE_PASSWORD
+- KEY_ALIAS：nova-release
+- KEY_PASSWORD：与 PKCS12 存储密码一致
 
-- `KEYSTORE_PATH`
-- `KEYSTORE_PASSWORD`
-- `KEY_ALIAS`
-- `KEY_PASSWORD`
-
-运行 `./gradlew :app:assembleRelease`。
+运行 `./gradlew :app:assembleRelease`。缺失签名变量时打包直接失败，不会退回 debug 密钥，也不交付 unsigned APK。
 
 ## GitHub Actions
 
-配置 GitHub `production` environment 并启用人工审批保护（需要仓库所有者设置）。保存四个 secrets：
+默认 App validation 仅运行 release 变体单元测试，不产生或上传 debug APK。要在 GitHub 构建相同生产签名，所有者需自行为 production environment 配置：KEYSTORE_BASE64、KEYSTORE_PASSWORD、KEY_ALIAS、KEY_PASSWORD；建议为该 environment 开启人工审批。
 
-- `KEYSTORE_BASE64`：keystore 的 Base64 编码
-- `KEYSTORE_PASSWORD`
-- `KEY_ALIAS`
-- `KEY_PASSWORD`
-
-手动运行 `Signed release (owner configured)` 工作流。缺少任一 secret 会失败，不会退回 debug 签名。私钥仅在 Runner 临时目录存在，结束时清理。后续版本保持同一包名、同一生产签名、递增 versionCode 即可正常升级。
+手动运行 Production signed APK 工作流。私钥仅在 Runner 临时目录存在，结束时清理；缺少 Secrets 会失败。本次没有将新私钥自动传到 GitHub Secrets。
