@@ -22,5 +22,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "KeyAttestation"
+rootProject.name = "NovaCert"
 include(":app", ":stub")

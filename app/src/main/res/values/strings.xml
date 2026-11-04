@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">密钥认证增强版</string>
+    <string name="app_name">密钥认证</string>
     <string name="use_shizuku">Use Shizuku</string>
     <string name="use_sak">Use Knox attestation</string>
     <string name="use_strongbox">Use StrongBox</string>

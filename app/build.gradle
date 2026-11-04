@@ -19,12 +19,12 @@ if (local.exists()) {
 android {
     compileSdk = 35
     buildToolsVersion = '35.0.1'
-    namespace = 'io.github.vvb2060.keyattestation'
+    namespace = 'com.larus.nova'
     defaultConfig {
         minSdk = 24
         targetSdk = 35
-        versionCode = 230
-        versionName = '2.3.0'
+        versionCode = 240
+        versionName = '2.4.0'
         applicationId = 'com.larus.nova'
         resourceConfigurations += ['en', 'zh-rCN', 'zh-rTW', 'pt-rBR']
         optimization {
@@ -167,7 +167,7 @@ abstract class ClassVisitorFactory implements AsmClassVisitorFactory<Instrumenta
     }
 
     boolean isInstrumentable(ClassData classData) {
-        return classData.className.startsWith("io.github.vvb2060.keyattestation.keystore.")
+        return classData.className.startsWith("com.larus.nova.keystore.")
     }
 }
 
