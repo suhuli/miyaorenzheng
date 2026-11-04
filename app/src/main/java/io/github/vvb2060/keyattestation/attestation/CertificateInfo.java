@@ -26,6 +26,17 @@ public class CertificateInfo {
     private CertificateParsingException certException;
 
     private ProvisioningInfo provisioningInfo;
+    private boolean signatureValid, legacyExpiredAccepted, allowExpired;
+    private RevocationList revocation;
+    public boolean isSignatureValid() { return signatureValid; }
+    public boolean isLegacyExpiredAccepted() { return legacyExpiredAccepted; }
+    public RevocationList getRevocation() { return revocation; }
+    public String getValidityLabel() {
+        if (legacyExpiredAccepted) return "已过期 · 旧工厂链兼容";
+        if (cert.getNotBefore().after(new java.util.Date())) return "尚未生效";
+        if (cert.getNotAfter().before(new java.util.Date())) return "已过期";
+        return "有效期内";
+    }
 
     private CertificateInfo(X509Certificate cert) {
         this.cert = cert;
@@ -66,16 +77,23 @@ public class CertificateInfo {
 
     private void checkStatus(PublicKey parentKey) {
         securityException = null;
+        signatureValid = false; legacyExpiredAccepted = false; revocation = null;
         try {
             status = CERT_SIGN;
             cert.verify(parentKey);
+            signatureValid = true;
             status = CERT_REVOKED;
             var certStatus = RevocationList.get(cert.getSerialNumber());
+            revocation = certStatus;
             if (certStatus != null) {
                 throw new CertificateException("Certificate revocation " + certStatus);
             }
             status = CERT_EXPIRED;
-            cert.checkValidity();
+            try { cert.checkValidity(); }
+            catch (java.security.cert.CertificateExpiredException e) {
+                if (!allowExpired) throw e;
+                legacyExpiredAccepted = true;
+            }
             status = CERT_NORMAL;
         } catch (GeneralSecurityException e) {
             Log.e(AppApplication.TAG, "checkStatus", e);
@@ -104,10 +122,14 @@ public class CertificateInfo {
         return terminate;
     }
 
-    public void revalidate(X509Certificate parent) {
+    public void revalidate(X509Certificate parent) { revalidate(parent, false); }
+
+    public void revalidate(X509Certificate parent, boolean allowLegacyExpiry) {
+        allowExpired = allowLegacyExpiry;
         checkStatus(parent.getPublicKey());
         if (!cert.getIssuerX500Principal().equals(parent.getSubjectX500Principal())) {
             status = CERT_SIGN;
+            signatureValid = false;
             securityException = new CertificateException("Issuer/subject chain mismatch");
         }
         checkIssuer();

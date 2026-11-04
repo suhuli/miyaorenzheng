@@ -38,6 +38,10 @@ class AppApplication : Application() {
         DayNightDelegate.setDefaultNightMode(DayNightDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
         HtmlCompat.setContext(this)
         installProvider(this)
+        androidx.work.WorkManager.initialize(this, androidx.work.Configuration.Builder().build())
+        if (getSharedPreferences("dashboard", 0).getBoolean("reminders", false)) {
+            io.github.vvb2060.keyattestation.dashboard.ExpiryWorker.schedule(this, true)
+        }
 
         if (Sui.init(BuildConfig.APPLICATION_ID)) {
             KeyStoreManager.requestPermission();

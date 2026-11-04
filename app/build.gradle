@@ -23,8 +23,8 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 35
-        versionCode = 199
-        versionName = '2.0.1-community'
+        versionCode = 210
+        versionName = '2.1.0-community'
         applicationIdSuffix = '.community.fix'
         resourceConfigurations += ['en', 'zh-rCN', 'zh-rTW', 'pt-rBR']
         optimization {
@@ -35,6 +35,14 @@ android {
     }
 
     signingConfigs {
+        production {
+            if (System.getenv('KEYSTORE_PATH')) {
+                storeFile file(System.getenv('KEYSTORE_PATH'))
+                storePassword System.getenv('KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KEY_ALIAS')
+                keyPassword System.getenv('KEY_PASSWORD')
+            }
+        }
         debug {
             if (properties.getProperty("storeFile") != null) {
                 storeFile file(properties.getProperty("storeFile"))
@@ -52,7 +60,7 @@ android {
             minifyEnabled true
             shrinkResources true
             vcsInfo.include false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.production
             proguardFiles 'proguard-rules.pro'
         }
     }
@@ -87,6 +95,11 @@ android {
         installOptions += ["--user 0"]
     }
 
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all { systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'; maxHeapSize = '384m'; jvmArgs '-XX:ActiveProcessorCount=2', '-XX:+UseSerialGC' }
+    }
+
     lint.checkReleaseBuilds false
     dependenciesInfo.includeInApk false
 }
@@ -103,6 +116,9 @@ configurations.configureEach {
 
 dependencies {
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    implementation 'androidx.work:work-runtime-ktx:2.10.0'
 
     compileOnly project(':stub')
 

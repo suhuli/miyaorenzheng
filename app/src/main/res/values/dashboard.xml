@@ -1,0 +1,22 @@
+<resources>
+    <color name="dash_background">#F5F7FA</color>
+    <color name="dash_surface">#FFFFFF</color>
+    <color name="dash_text">#172A39</color>
+    <color name="dash_muted">#586B7B</color>
+    <color name="dash_accent">#146C60</color>
+    <color name="dash_accent_soft">#E2F3ED</color>
+    <color name="dash_outline">#DFE6EC</color>
+    <color name="dash_warning">#946000</color>
+    <color name="dash_error">#B3261E</color>
+    <style name="DashboardTheme" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/dash_accent</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">@color/dash_accent</item>
+        <item name="colorSurface">@color/dash_surface</item>
+        <item name="colorOnSurface">@color/dash_text</item>
+        <item name="android:colorBackground">@color/dash_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+</resources>

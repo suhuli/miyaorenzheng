@@ -106,6 +106,8 @@ public class RootPublicKey {
         return set;
     }
 
+    public static boolean isLegacyGoogleKey(byte[] key) { return Arrays.equals(key, googleKey); }
+
     public static Status check(byte[] publicKey) {
         if (OfficialData.matches(publicKey)) {
             return Status.GOOGLE;

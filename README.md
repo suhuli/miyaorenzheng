@@ -1,87 +1,72 @@
-# Key Attestation Community 2.0.1
+# 密钥认证 · Key Attestation Community 2.1
 
-项目仓库：[suhuli/miyaorenzheng](https://github.com/suhuli/miyaorenzheng)。
+原生 Android 本机密钥证明诊断工具。Material 风格新首页、证书链可视化、本地历史对比、官方信任数据更新与 RKP 配置证据识别。
 
-基于 [vvb2060/KeyAttestation](https://github.com/vvb2060/KeyAttestation) 的非官方社区修改版。
-上游基线：`b223a9be86cb2a747625d8e47f3456646d55bd7a`（1.8.4）。不是 Google 或上游发布的官方 App。
-保留上游作者、版权声明与 Apache-2.0 许可，原说明见 README.upstream.md。
+社区仓库：https://github.com/suhuli/miyaorenzheng
 
-## 2.0.1 双证书链误判修复
+基于 [vvb2060/KeyAttestation](https://github.com/vvb2060/KeyAttestation) 的非官方社区修改版，上游基线 `b223a9be86cb2a747625d8e47f3456646d55bd7a`。保留上游作者、版权和 Apache-2.0 许可，见 LICENSE、README.upstream.md。不是 Google 或原作者的官方发行版。
 
-2.0 在启用 App Attest Key 时，把两条完整独立链拼接；上游排序在多叶/重复根情况下回退原顺序，新增加的 issuer 校验因此在第二个根处报错。新 EC 根 RKP 和旧 RSA 根密钥都受此问题影响，并非仅新根识别问题，也不是本次报告中的有效期问题。
+## 四个分区
 
-- 实际别名已经返回完整链时，不再追加独立 App Attest Key 链。
-- 按证书内容去重，以实际生成的叶证书为目标，结合 issuer 名称与密码学签名构造单一路径；不再把多条链串接或回退原顺序。
-- 需要 App Attest Key 补链时仍支持补链，且每条边继续验签。
-- 无指定目标的导入若含多条独立链，明确要求分别导入，不猜测目标，也不放松安全校验。
-- 保留官方根、有效期与撤销检查；13 项新增回归测试使用合成 X.509 证书（包含新 EC 根/旧 RSA 根的双完整链结构），没有冒充用户真实证书验证。
-- 本次测试签名与 2.0 不同，因此修复版改用独立 `.community.fix` 包名并标记 Community Fix，可以并装；不能访问旧 App 私有数据/密钥，请在新版重新生成证明，必要时自行导入之前保存的公开证书。
+- **概览**：配置类型、根来源、签名路径、有效期策略、撤销检查分别显示；设备启动状态与安全级别不是一张“绝对安全”绿卡。
+- **证书链**：根到目标证书的层级连接、每条连接验签、有效期、RKP 扩展和完整字段；原有高级工具独立保留。
+- **记录**：本机最多 30 次摘要、任意两次对比、停止记录/一键清空；正常轮换不当成泄露。摘要仍含可关联指纹。
+- **设置**：固定 Google HTTPS 官方数据更新、差异和错误、离线数据包导入导出、隐私、临期通知、浅/深色与跟随系统。
 
-## 新增/修正
+详细变更与安全边界见 **FEATURE-2.1.md**。2.0.1 的双完整链误判修复继续保留，见 FIX-2.0.1.md。
 
-- **官方数据**：Google 官方 `https://android.googleapis.com/attestation/root` 和 `https://android.googleapis.com/attestation/status`。打包时已从这两个接口获取快照，包含 RSA 与 EC 两个根证书、1769 个撤销条目；数量会随官方更新变化。
-- **在线更新与缓存**：打开主界面时检查缓存，24 小时内不重复下载；也可以通过菜单强制更新。仅在前台启动检查，不是常驻后台定时同步。固定 HTTPS 来源、不跟随重定向、连接/读取超时、8 MiB 响应限制、解析后再原子保存成对数据。失败保留上次有效数据；时间异常/超过 24 小时/内置快照均提示当前撤销状态未确认。
-- **根轮换**：根公钥集合来自官方根证书数组，不再只匹配旧 RSA 根。设备 OEM/AOSP/Knox 的原有识别保留，但不冒充官方 Google 根。
-- **RKP 识别**：根到叶检查 `1.3.6.1.4.1.11129.2.1.30` provisioning 扩展，要求最近的配置扩展紧邻证明证书，展示 certs_issued / manufacturer（如果提供）。只有官方根及签名/有效期/撤销检查通过时才标记为“已识别”；扩展存在但链失败标记不可信；未找到证据标记“无法确定”，不武断标为工厂密钥。不能识别任意“远程私钥位置”，也不连接远端去提取密钥。
-- **验证修正**：过期证书不再进入正常链状态；检查 issuer/subject 对应；只有硬件声明用途集合恰为 ATTEST_KEY 才允许沿自定义证明密钥继续解析，避免混合 SIGN 用途绕过；防御畸形 provisioning CBOR 引发的运行时异常。更新数据后重验当前显示链。
-- **报告导出**：菜单导出 UTF-8 报告，含数据来源/更新时间、RKP 结论、证书主体/发行者/序列号/有效期/SHA-256、解析证明及错误信息。使用系统文件选择器，导出前隐私提示。
-- **原有功能保留**：TEE/StrongBox、自定义 attest key、证书导入/导出、启动锁与安全级别、证明授权字段，以及需要设备支持和 Shizuku 权限的功能。主动 RKP 测试新增联网确认。
-- **独立包名**：`io.github.vvb2060.keyattestation.community.fix`，可与原版并存。
+## 数据与判断依据
 
-## 使用
+- 官方根：https://android.googleapis.com/attestation/root
+- 官方撤销列表：https://android.googleapis.com/attestation/status
+- 官方说明：https://developer.android.com/privacy-and-security/security-key-attestation
+- RKP 扩展：https://source.android.com/docs/security/features/keystore/attestation#provisioninginfo_extension
 
-1. 安装 `KeyAttestation-Community-2.0.1-debug.apk`，Android 7.0/API 24 或以上。
-2. 启动读取本机密钥证明。菜单“更新官方信任数据”可强制刷新；“官方数据来源与更新状态”查看错误和新鲜度。
-3. 在证书链上方查看“RKP detection / 远程密钥识别”。识别本身不需要 Shizuku；是否有 RKP 证据取决于系统实际返回的证书链。
-4. 菜单可切换 StrongBox、加载证书、保存证书，或导出文本报告。某些选项只在支持的系统/硬件和授权条件下显示。
-5. 主动 RKP 测试属于上游高级功能，需要 Shizuku/平台接口，不等于被动证书识别，不能保证所有新系统都可用。
+RKP 识别来自证书配置扩展，并非“远程读取私钥”。支持 certs_issued、旧 manufacturer、validated_attested_entity、is_lost_device 和未知字段保留。30 天颁发数是签发时近似快照，不是实时使用次数或共享人数。
 
-## 重要边界
+旧 Google RSA 公钥固定匹配、明确工厂路径、无 RKP 配置扩展时，支持保守的旧工厂链过期兼容；RKP/未知路径/尚未生效证书不放宽。可选择全部严格有效期模式。签名和撤销检查不关闭。
 
-- 这是**本机诊断工具**，不是 Play Integrity API，不证明设备绝对安全、不保证 Keybox 唯一，也不保证系统未被篡改。
-- 不在可疑设备上做最终信任决定。官方建议在独立可信服务器验证证明，并校验服务端新鲜挑战。此版本没有实现服务端挑战协议、服务端验证服务或生产级完整 PKIX 策略引擎。
-- 扩展证据/官方根识别与设备完整性是不同结论；当前撤销数据过期时，未命中条目不等于当前未撤销。
-- 有些旧版 RKP 链可能没有可识别配置扩展，因此显示“无法确定”是有意的保守结果。
-- 有效期采取严格失败策略；不会自动套用官方对特定过期工厂密钥的例外政策，可能比官方生产验证器更保守。
-- 官方数据更新仅下载公开数据，不上传设备证明。**原有主动 RKP 测试**在确认后会向配置的 RKP 服务提交 CSR/配置数据；请勿向不可信自定义主机发送。
-- 报告和证书可能带设备相关标识；只在自愿导出时写入所选位置，不自动上传。
+离线导入不取得在线新鲜度，不接受新任意信任根，不抹去本机已有撤销条目。8 MiB 数据限额、原子缓存和失败保留旧快照。导入格式见 FEATURE-2.1.md。
 
-## 构建
+## 安装与权限
 
-需要 JDK 21、Android SDK platform 35、Build Tools 35.0.1。
+- Android 7.0 / API 24 以上。
+- 测试版包名：`io.github.vvb2060.keyattestation.community.fix`，与 2.0.1 保持一致；须用同一签名才能覆盖升级。
+- INTERNET 仅用于公开信任数据更新；原有主动 RKP 高级工具需确认后向所选服务提交配置数据。
+- 临期通知默认关闭，Android 13+ 开启时请求通知权限。WorkManager 约每 12 小时检查上次本机 RKP 快照，受节电调度限制，不联网断言当前证书状态。
+- 历史/报告不自动上传；完整导出先提示，默认提供白名单脱敏报告。系统自动备份关闭。
+
+## 构建与测试
+
+JDK 21、Android SDK platform 35、Build Tools 35.0.1。设置 ANDROID_HOME 或 local.properties 中 sdk.dir。
 
 ```sh
-# 设置 ANDROID_HOME 或在 local.properties 写 sdk.dir=/你的SDK路径
 chmod +x gradlew
 ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon
 ```
 
-输出：`app/build/outputs/apk/debug/app-debug.apk`。Gradle 8.12、AGP 8.8.0、Kotlin 2.1.0 保持与可验证上游工具链兼容，语言级别修正为 2.1；没有未经验证地升级所有依赖到“最新”。
-低内存环境默认限制 1 个 Gradle worker / 进程内 Kotlin 编译；内存充裕时可自行提高。
-CI 已配置构建、20 项证据政策/证书链单元测试及上传 APK。
+低内存环境建议分步（避免 Kotlin 编译器与 Robolectric 争用内存）：
 
-### 签名说明
+```sh
+./gradlew :app:assembleDebug :app:compileDebugUnitTestJavaWithJavac --no-daemon
+./gradlew :app:testDebugUnitTest --no-daemon '-Dorg.gradle.jvmargs=-Xmx320m -XX:MaxMetaspaceSize=256m -XX:+UseSerialGC -XX:ActiveProcessorCount=2'
+```
 
-附带 APK 是**debug 测试签名**，可安装但不作为正式商店发行包。未来自行构建使用不同测试签名时可能需卸载旧版。
-正式发行请由你自己创建/保管 keystore，并修改 signingConfigs/buildTypes.release；不要把私钥提交到仓库。
-**上游 release 默认沿用 debug 签名的设置仍存在，不能直接当成正式发行签名。**
+输出 `app/build/outputs/apk/debug/app-debug.apk`。完整测试记录和真机待验收清单见 TESTING.md。
 
-### 数据快照检查
+快照独立检查：
 
 ```sh
 pip install cryptography
 python tools/check_official_snapshot.py
 ```
 
-验证快照根自签名、CA 属性和撤销数据格式，不伪造手机证明。已知测试范围见 TESTING.md。
+## 稳定签名与 CI
 
-## 官方参考
+Debug 构建不等于生产发行。正式 release 不再退回 debug 签名；需要仓库所有者配置和保管正式签名材料。手动生产 CI 与迁移说明见 **SIGNING.md**。不要向聊天或代码仓库提交私钥、令牌、keybox.xml 或真实诊断报告。
 
-- https://developer.android.com/privacy-and-security/security-key-attestation
-- https://source.android.com/docs/security/features/keystore/attestation
-- https://android.googleapis.com/attestation/root
-- https://android.googleapis.com/attestation/status
+## 不做的承诺
 
-## 许可
+本版本按需求**不做服务端挑战验证**。本机环境可能被篡改，本地验证不能保证系统未被入侵，不是 Play Integrity，不证明 Keybox 唯一。需要做重要安全决定时，应在独立可信环境校验证明和新鲜挑战。
 
-Apache License 2.0，见 LICENSE；上游及第三方版权归各权利人所有。
+本地策略/模拟界面测试不等于真实 TEE/StrongBox/RKP/各 ROM 验证；没有依据不输出“密钥安全分数”。

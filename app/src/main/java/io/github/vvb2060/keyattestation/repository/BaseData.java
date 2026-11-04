@@ -16,6 +16,21 @@ public abstract class BaseData {
             return;
         }
 
+        var root = certs.get(0).getCert();
+        boolean factory = false, provisioning = false;
+        for (var info : certs) {
+            var name = info.getCert().getSubjectX500Principal().getName();
+            if (info.getAttestation() == null && java.util.regex.Pattern.compile("(^|,)T=(TEE|StrongBox|STRONGBOX)(,|$)").matcher(name).find()) factory = true;
+            if (info.getCert().getExtensionValue("1.3.6.1.4.1.11129.2.1.30") != null) provisioning = true;
+        }
+        boolean strict = io.github.vvb2060.keyattestation.AppApplication.app
+                .getSharedPreferences("dashboard", 0).getBoolean("strict_expiry", false);
+        boolean allow = io.github.vvb2060.keyattestation.attestation.ValidityPolicy.allowExpired(
+            io.github.vvb2060.keyattestation.attestation.OfficialData.matches(root.getPublicKey().getEncoded())
+                && RootPublicKey.isLegacyGoogleKey(root.getPublicKey().getEncoded()), factory, provisioning, strict);
+        var parent = root;
+        for (var info : certs) { info.revalidate(parent, allow); parent = info.getCert(); }
+
         var status = certs.get(0).getIssuer();
         for (var cert : certs) {
             if (cert.getStatus() != CertificateInfo.CERT_NORMAL) {
@@ -29,17 +44,9 @@ public abstract class BaseData {
         this.status = status;
     }
 
-    public void revalidate() {
-        if (certs == null || certs.isEmpty()) return;
-        var parent = certs.get(0).getCert();
-        for (var info : certs) {
-            info.revalidate(parent);
-            parent = info.getCert();
-        }
-        init(certs);
-    }
+    public void revalidate() { if (certs != null) init(certs); }
 
-    private boolean hasRkpEvidence() {
+    public boolean hasRkpEvidence() {
         boolean[] p = new boolean[certs.size()], a = new boolean[certs.size()];
         for (int i = 0; i < certs.size(); i++) {
             p[i] = certs.get(i).getCert().getExtensionValue("1.3.6.1.4.1.11129.2.1.30") != null;
@@ -56,7 +63,7 @@ public abstract class BaseData {
                 : "RKP：无法确定；未发现可验证配置扩展，不能据此判定为工厂密钥";
         for (var cert : certs) {
             var p = cert.getProvisioningInfo();
-            if (p != null) result += "\ncerts_issued: " + p.getCertsIssued() + "\nmanufacturer: " + p.getManufacturer();
+            if (p != null) result += "\n" + p.describe();
         }
         return result + "\n当前撤销数据：" + (io.github.vvb2060.keyattestation.attestation.OfficialData.isFresh()
                 ? "24 小时内更新" : "离线/过期，当前撤销状态未确认")
