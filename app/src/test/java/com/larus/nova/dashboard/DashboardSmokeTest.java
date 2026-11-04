@@ -103,35 +103,27 @@ public class DashboardSmokeTest {
         }
     }
 
-    private void configCard(DashboardActivity activity, com.larus.nova.attestation.ProvisioningFields fields, boolean absent) throws Exception {
-        com.larus.nova.attestation.ProvisioningInfo info=null;
-        if(fields!=null){var ctor=com.larus.nova.attestation.ProvisioningInfo.class.getDeclaredConstructor(com.larus.nova.attestation.ProvisioningFields.class);ctor.setAccessible(true);info=ctor.newInstance(fields);}
-        var method=DashboardActivity.class.getDeclaredMethod("provisioningCard",java.util.List.class);method.setAccessible(true);
-        method.invoke(activity,absent?java.util.List.of():java.util.List.of(new kotlin.Pair<Integer,com.larus.nova.attestation.ProvisioningInfo>(2,info)));
+    public static class SyntheticData extends com.larus.nova.repository.BaseData {
+        SyntheticData() { certs=java.util.List.of(); status=com.larus.nova.attestation.RootPublicKey.Status.NULL; }
     }
-    @Test public void homeConfigCardShowsMissingExtensionHonestly() throws Exception {
-        try(var c=activity()){configCard(c.get(),null,true);var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"配置扩展"));assertTrue(containsText(root,"未发现配置扩展"));}
+    @Test public void overviewKeepsCertificateDeviceAndActionsWithoutConfigCard() throws Exception {
+        try(var c=activity()) {
+            var current=DashboardActivity.class.getDeclaredField("current");current.setAccessible(true);current.set(c.get(),new SyntheticData());
+            var loading=DashboardActivity.class.getDeclaredField("loading");loading.setAccessible(true);loading.setBoolean(c.get(),false);
+            var render=DashboardActivity.class.getDeclaredMethod("render");render.setAccessible(true);render.invoke(c.get());
+            var root=c.get().getWindow().getDecorView();
+            assertTrue(containsText(root,"证书"));assertTrue(containsText(root,"设备"));
+            assertTrue(containsText(root,"重新检测"));assertTrue(containsText(root,"查看证书"));
+            assertFalse(containsText(root,"配置扩展"));assertFalse(containsText(root,"30 天颁发近似数"));
+        }
     }
-    @Test public void homeConfigCardDistinguishesParseFailure() throws Exception {
-        try(var c=activity()){configCard(c.get(),null,false);assertTrue(containsText(c.get().getWindow().getDecorView(),"扩展存在，解析失败"));}
-    }
-    @Test public void homeConfigCardShowsFieldsAndLostFlag() throws Exception {
-        try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.certsIssued=123L;fields.validatedAttestedEntity="TEE";fields.lostDevice=true;fields.manufacturer="Vendor";fields.unknown.put("99","future");configCard(c.get(),fields,false);
-            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"123"));assertTrue(containsText(root,"TEE"));assertTrue(containsText(root,"标记为遗失设备"));assertTrue(containsText(root,"Vendor"));assertTrue(containsText(root,"字段 99"));assertTrue(containsText(root,"future"));assertTrue(containsText(root,"查看第 2 张配置详情"));}
-    }
-    @Test public void homeConfigCardDoesNotTreatMissingLostFlagAsFalse() throws Exception {
-        try(var c=activity()){configCard(c.get(),new com.larus.nova.attestation.ProvisioningFields(),false);var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"未提供"));assertFalse(containsText(root,"未标记（非实时）"));}
-    }
-    @Test public void homeConfigCardExplicitFalseIsNotRealTimeSafetyClaim() throws Exception {
-        try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.lostDevice=false;configCard(c.get(),fields,false);assertTrue(containsText(c.get().getWindow().getDecorView(),"未标记（非实时）"));}
-    }
-
-    @Test public void homeConfigCardShowsNestedFieldPathsAndCompleteValues() throws Exception {
-        var child=new co.nstant.in.cbor.model.Map();child.put(new co.nstant.in.cbor.model.UnsignedInteger(1),new co.nstant.in.cbor.model.UnicodeString("APPROVED"));
-        String synthetic="ab".repeat(32);child.put(new co.nstant.in.cbor.model.UnsignedInteger(2),new co.nstant.in.cbor.model.UnicodeString(synthetic));
-        var map=new co.nstant.in.cbor.model.Map();map.put(new co.nstant.in.cbor.model.UnsignedInteger(5),child);
-        var out=new java.io.ByteArrayOutputStream();new co.nstant.in.cbor.CborEncoder(out).encode(map);
-        try(var c=activity()){configCard(c.get(),com.larus.nova.attestation.ProvisioningFields.parse(out.toByteArray()),false);
-            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"字段 5.1 · 文本"));assertTrue(containsText(root,"APPROVED"));assertTrue(containsText(root,"字段 5.2 · 文本"));assertTrue(containsText(root,synthetic));assertFalse(containsText(root,"SHA-256"));}
+    @Test public void launcherProvidesAdaptiveAndThemedIcons() {
+        try(var c=activity()) {
+            var drawable=c.get().getDrawable(R.drawable.ic_launcher);
+            assertTrue(drawable instanceof android.graphics.drawable.AdaptiveIconDrawable);
+            var icon=(android.graphics.drawable.AdaptiveIconDrawable)drawable;
+            assertNotNull(icon.getBackground());assertNotNull(icon.getForeground());assertNotNull(icon.getMonochrome());
+            assertEquals(R.drawable.ic_launcher,c.get().getApplicationInfo().icon);
+        }
     }
 }

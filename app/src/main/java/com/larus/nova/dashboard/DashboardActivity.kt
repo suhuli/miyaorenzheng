@@ -261,10 +261,6 @@ open class DashboardActivity : AppCompatActivity() {
         row(device, "启动锁", trust?.let { if (it.isDeviceLocked) "已锁定" else "未锁定" } ?: "未提供")
         row(device, "启动状态", trust?.let { RootOfTrust.verifiedBootStateToString(it.verifiedBootState) } ?: "未提供")
         row(device, "安全补丁", att?.teeEnforced?.osPatchLevel?.toString() ?: "未提供")
-        provisioningCard(data.certs.mapIndexedNotNull { index, info ->
-            if (info.cert.getExtensionValue("1.3.6.1.4.1.11129.2.1.30") != null)
-                Pair(index + 1, info.provisioningInfo) else null
-        })
         val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val refreshButton = MaterialButton(this).apply { text = "重新检测"; cornerRadius = dp(14); setOnClickListener { source = "本机生成"; model.load() } }
         val detailButton = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply { text = "查看证书"; cornerRadius = dp(14); setOnClickListener { navigation.selectedItemId = 2 } }
@@ -272,33 +268,6 @@ open class DashboardActivity : AppCompatActivity() {
         actionRow.addView(detailButton, LinearLayout.LayoutParams(0, dp(52), 1f))
         page.addView(actionRow)
         page.addView(text(if (updating) "数据更新中…" else "${OfficialData.source()} · ${if (OfficialData.fetchedAt() == 0L) "未更新" else date(OfficialData.fetchedAt())}", 11, false, R.color.dash_muted).apply { setPadding(0, dp(12), 0, 0) })
-    }
-    private fun provisioningCard(items: List<Pair<Int, ProvisioningInfo?>>) {
-        val box = card("配置扩展")
-        if (items.isEmpty()) {
-            row(box, "状态", "未发现配置扩展")
-            return
-        }
-        items.forEach { (position, info) ->
-            row(box, "所在证书", "第 $position 张（从根计数）")
-            if (info == null) {
-                row(box, "状态", "扩展存在，解析失败", R.color.dash_warning)
-            } else {
-                row(box, "30 天颁发近似数", info.certsIssued?.toString() ?: "未提供")
-                row(box, "受认证来源", info.validatedAttestedEntity ?: "未提供")
-                row(box, "遗失设备字段", info.lostDevice?.let { if (it) "标记为遗失设备" else "未标记（非实时）" } ?: "未提供",
-                    if (info.lostDevice == true) R.color.dash_error else R.color.dash_text)
-                info.manufacturer?.let { row(box, "制造商（旧字段）", it) }
-                if (info.extraFields.isNotEmpty()) {
-                    info.extraFields.forEach { field -> row(box, "字段 ${field.path()} · ${field.type()}", field.value()) }
-                    box.addView(text("附加字段的业务含义尚未确认，保留原文。", 12, false, R.color.dash_muted))
-                } else {
-                    info.unknownFields.forEach { (key, value) -> row(box, "字段 $key", value) }
-                }
-                button(box, "查看第 $position 张配置详情", true) { message("配置扩展", info.describe()) }
-            }
-        }
-        box.addView(text("签发时快照，非实时计数或设备状态。", 12, false, R.color.dash_muted))
     }
     private fun chain() {
         heading("证书链", "从信任根到目标密钥 · 每条连接单独验证")

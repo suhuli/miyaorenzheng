@@ -1,6 +1,6 @@
-# 2.4.3 正式签名
+# 2.5.1 正式签名
 
-本版为正式 `release` 构建：包名 `com.larus.nova`，应用名「密钥认证」，版本 2.4.3 / 243；不附加 community/debug 后缀，`debuggable=false`。开启代码压缩和资源缩减；保留依赖库 consumer keep rules 与 Worker 反射构造规则。
+本版为正式 `release` 构建：包名 `com.larus.nova`，应用名「密钥认证」，版本 2.5.1 / 251；不附加 community/debug 后缀，`debuggable=false`。开启代码压缩和资源缩减；保留依赖库 consumer keep rules 与 Worker 反射构造规则。
 
 沿用 2.3.0 时所有者选择生成的独立生产密钥，不重新生成。2.4.0 可覆盖安装 2.3.0。使用 RSA-3072 / SHA256withRSA、PKCS12、别名 `nova-release`；不是 Android debug 密钥。私钥和随机生成的密码单独私下交付，不进入 Git/GitHub 发布、网盘或公开源码。
 
