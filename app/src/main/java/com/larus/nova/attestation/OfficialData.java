@@ -5,6 +5,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.URL;
+import java.util.concurrent.*;
 import java.nio.charset.StandardCharsets;
 import java.security.cert.*;
 import java.util.*;
@@ -23,7 +24,19 @@ public final class OfficialData {
     private static volatile String lastError = "";
     private static String rawRoots, rawStatus;
     private static long latestMirrorFetchedAt;
-    private static String lastChange = "尚无在线更新记录";
+    private static final Object UPDATE_LOCK = new Object();
+    private static final ThreadPoolExecutor DOWNLOADS = new ThreadPoolExecutor(2, 2, 30, TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(2), r -> { Thread t = new Thread(r, "trust-download"); t.setDaemon(true); return t; });
+    static { DOWNLOADS.allowCoreThreadTimeOut(true); }
+    private static long lastCheckNanos;
+    private static String checkedPriority = "";
+    private static boolean lastResult;
+    private static volatile boolean checking;
+    private static volatile long startedNanos;
+    private static volatile String phase = "尚未检查", timing = "";
+    private static StringBuilder trace;
+    private static long phaseNanos;
+    private static volatile String lastChange = "尚无在线更新记录";
     public static long fetchedAt() { return current.fetchedAt(); }
     public static String source() { return current.source(); }
     public static String changes() { return lastChange; }
@@ -37,7 +50,10 @@ public final class OfficialData {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         byte[] b = new byte[8192];
         int n;
-        while ((n = in.read(b)) != -1) {
+        while (true) {
+            if (Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
+            n = in.read(b);
+            if (n == -1) break;
             if (out.size() + n > MAX_BYTES) throw new IOException("Official response too large");
             out.write(b, 0, n);
         }
@@ -67,6 +83,7 @@ public final class OfficialData {
     public static synchronized void initialize(Context context) {
         if (current != null) return;
         latestMirrorFetchedAt = 0;
+        lastCheckNanos = 0; checkedPriority = "";
         try (InputStream r = context.getResources().openRawResource(R.raw.roots);
              InputStream s = context.getResources().openRawResource(R.raw.status)) {
             rawRoots = read(r); rawStatus = read(s);
@@ -101,12 +118,13 @@ public final class OfficialData {
     }
     private static String download(String url) throws IOException {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(6000); c.setReadTimeout(10000);
+        c.setConnectTimeout(4000); c.setReadTimeout(4000);
         c.setInstanceFollowRedirects(false);
         c.setUseCaches(false);
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Cache-Control", "no-cache");
         try {
+            if (Thread.currentThread().isInterrupted()) throw new IOException("下载已取消");
             if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
             try (InputStream in = c.getInputStream()) { return read(in); }
         } finally { c.disconnect(); }
@@ -114,7 +132,7 @@ public final class OfficialData {
     @FunctionalInterface
     interface Downloader { String get(String url) throws IOException; }
 
-    public static synchronized boolean refresh(Context context, boolean force) {
+    public static boolean refresh(Context context, boolean force) {
         return refresh(context, force, OfficialData::download);
     }
     public static String priority(Context context) {
@@ -122,28 +140,89 @@ public final class OfficialData {
             .getString(DataSourcePolicy.KEY, DataSourcePolicy.OFFICIAL_FIRST));
     }
     public static String priorityLabel(Context context) { return DataSourcePolicy.label(priority(context)); }
-    // Package-private transport seam permits deterministic fallback/authority regression tests.
-    static synchronized boolean refresh(Context context, boolean force, Downloader downloader) {
-        initialize(context);
-        boolean mirrorFirst = priority(context).equals(DataSourcePolicy.MIRROR_FIRST);
+    public static String updateStatus() {
+        return checking ? phase + " · 已用 " + ((System.nanoTime()-startedNanos)/1_000_000_000L) + " 秒" : phase;
+    }
+    private static void stage(String value) {
+        long now = System.nanoTime();
+        if (trace != null && phaseNanos != 0) trace.append(phase).append(": ")
+            .append((now-phaseNanos)/1_000_000L).append("ms\n");
+        phase = value; phaseNanos = now;
+    }
+    // A source gets 8s of network waiting; fallback gets a separate 8s. Workers only
+    // return strings: a late/uncancellable DNS result can never publish trust data.
+    private static final class BudgetDownloader implements Downloader {
+        private final Downloader delegate;
+        private final long deadline;
+        BudgetDownloader(Downloader delegate, long budgetMillis) {
+            this.delegate=delegate; deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(budgetMillis);
+        }
+        public String get(String url) throws IOException {
+            stage(url.equals(ROOT_URL) ? "获取官方根证书" : url.equals(STATUS_URL) ? "获取官方撤销数据"
+                : url.equals(MIRROR_MANIFEST) ? "获取仓库清单" : "下载仓库快照");
+            long remaining=deadline-System.nanoTime();
+            if (remaining<=0) throw new IOException("当前来源网络等待超时");
+            Future<String> task;
+            try { task=DOWNLOADS.submit(() -> delegate.get(url)); }
+            catch (RejectedExecutionException e) { throw new IOException("网络工作线程繁忙，保留缓存",e); }
+            try { return task.get(remaining,TimeUnit.NANOSECONDS); }
+            catch (TimeoutException e) { throw new IOException("当前来源网络等待超时",e); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IOException("更新被中断",e); }
+            catch (ExecutionException e) { throw new IOException(e.getCause().getMessage(),e.getCause()); }
+            finally { if (!task.isDone()) { task.cancel(true); DOWNLOADS.remove((Runnable) task); } }
+        }
+    }
+    static boolean refresh(Context context, boolean force, Downloader downloader) {
+        return refresh(context,force,downloader,8000);
+    }
+    // Short budgets are injectable in tests; production always uses 8s per source.
+    static boolean refresh(Context context, boolean force, Downloader downloader, long budgetMillis) {
+        long requestedAt=System.nanoTime();
+        synchronized (UPDATE_LOCK) {
+            initialize(context);
+            String order=priority(context);
+            long now=System.nanoTime();
+            boolean same=order.equals(checkedPriority);
+            if (same && lastCheckNanos!=0 && (lastCheckNanos>=requestedAt
+                || (!force && now-lastCheckNanos < TimeUnit.SECONDS.toNanos(lastResult ? 300 : 30)
+                    && (!lastResult || isFresh())))) {
+                phase="近期已检查，沿用结果（本次未联网）";
+                return lastResult;
+            }
+            checking=true; startedNanos=now; phaseNanos=0; trace=new StringBuilder();
+            boolean result=false;
+            try { result=performRefresh(context,order,downloader,budgetMillis); return result; }
+            finally {
+                stage(result ? "检查完成" : "更新失败，保留缓存");
+                timing=trace.toString()+"总用时: "+((System.nanoTime()-startedNanos)/1_000_000L)+"ms";
+                phase=phase+" · "+((System.nanoTime()-startedNanos)/1_000_000L)+"ms";
+                checkedPriority=order; lastResult=result; lastCheckNanos=System.nanoTime();
+                checking=false; trace=null;
+            }
+        }
+    }
+    private static boolean performRefresh(Context context,String order,Downloader downloader,long budgetMillis) {
+        boolean mirrorFirst=order.equals(DataSourcePolicy.MIRROR_FIRST);
         String firstError;
         try {
-            if (mirrorFirst) fetchMirror(context, downloader, true); else fetchOfficial(context, downloader);
-            lastError = ""; return true;
-        } catch (Exception e) { firstError = e.getClass().getSimpleName() + ": " + e.getMessage(); }
+            Downloader bounded=new BudgetDownloader(downloader,budgetMillis);
+            if(mirrorFirst) fetchMirror(context,bounded,true); else fetchOfficial(context,bounded);
+            lastError=""; return true;
+        } catch(Exception e) { firstError=e.getClass().getSimpleName()+": "+e.getMessage(); }
         try {
-            if (mirrorFirst) fetchOfficial(context, downloader); else fetchMirror(context, downloader, false);
-            lastError = (mirrorFirst ? "镜像不可用，已回退 Google 官方：" : "官方不可用，已使用仓库镜像：") + firstError;
+            Downloader bounded=new BudgetDownloader(downloader,budgetMillis);
+            if(mirrorFirst) fetchOfficial(context,bounded); else fetchMirror(context,bounded,false);
+            lastError=(mirrorFirst ? "镜像不可用，已回退 Google 官方：" : "官方不可用，已使用仓库镜像：")+firstError;
             return true;
-        } catch (Exception e) {
-            String secondError = e.getClass().getSimpleName() + ": " + e.getMessage();
-            lastError = "官方：" + (mirrorFirst ? secondError : firstError)
-                + "\n镜像：" + (mirrorFirst ? firstError : secondError);
-            return false; // Keep the last validated local snapshot and its original age.
+        } catch(Exception e) {
+            String secondError=e.getClass().getSimpleName()+": "+e.getMessage();
+            lastError="官方："+(mirrorFirst ? secondError:firstError)+"\n镜像："+(mirrorFirst ? firstError:secondError);
+            return false;
         }
     }
     private static void fetchOfficial(Context context, Downloader downloader) throws Exception {
         String roots = downloader.get(ROOT_URL), status = downloader.get(STATUS_URL);
+        stage("校验并保存官方数据");
         // A complete valid official response is authoritative, regardless of mirror timestamps.
         accept(context, roots, status, System.currentTimeMillis(), "Google 官方直连");
     }
@@ -155,19 +234,30 @@ public final class OfficialData {
         // Fetch timestamps from different sources are NOT comparable version numbers.
         // An explicit mirror preference may replace newer direct-Google data with a valid
         // <=24h mirror snapshot. Preserve the original age. Never roll back mirror-to-mirror.
-        if (manifest.fetchedAt() < latestMirrorFetchedAt)
-            throw new IOException("仓库返回已接受镜像之前的旧版本");
-        boolean switchingFromOfficial = explicitlyPreferred && current.source().equals("Google 官方直连");
-        if (manifest.fetchedAt() < current.fetchedAt() && !switchingFromOfficial)
-            throw new IOException("镜像早于当前缓存，保留较新数据");
-        if (manifest.fetchedAt() != current.fetchedAt() || !current.source().equals("仓库镜像")) {
-            String body = downloader.get(MIRROR_BASE + manifest.path()); manifest.check(body);
-            JSONObject bundle = new JSONObject(body);
-            accept(context, bundle.getJSONArray("roots").toString(), bundle.getJSONObject("status").toString(),
-                manifest.fetchedAt(), "仓库镜像");
+        synchronized (OfficialData.class) {
+            validateMirror(manifest,explicitlyPreferred);
+            if (manifest.fetchedAt()==current.fetchedAt() && current.source().equals("仓库镜像")) return;
+        }
+        String body=downloader.get(MIRROR_BASE+manifest.path());
+        stage("校验并保存仓库数据");
+        manifest.check(body);
+        JSONObject bundle=new JSONObject(body);
+        synchronized (OfficialData.class) {
+            validateMirror(manifest,explicitlyPreferred);
+            accept(context,bundle.getJSONArray("roots").toString(),bundle.getJSONObject("status").toString(),
+                manifest.fetchedAt(),"仓库镜像");
         }
     }
-    private static void accept(Context context,String roots,String status,long time,String source) throws Exception {
+    private static void validateMirror(MirrorManifest manifest,boolean explicitlyPreferred) throws IOException {
+        long now=System.currentTimeMillis();
+        if(now-manifest.fetchedAt()>MAX_AGE || manifest.fetchedAt()>now)
+            throw new IOException("镜像过期或时间来自未来");
+        if(manifest.fetchedAt()<latestMirrorFetchedAt) throw new IOException("仓库返回已接受镜像之前的旧版本");
+        boolean switching=explicitlyPreferred && current.source().equals("Google 官方直连");
+        if(manifest.fetchedAt()<current.fetchedAt() && !switching)
+            throw new IOException("镜像早于当前缓存，保留较新数据");
+    }
+    private static synchronized void accept(Context context,String roots,String status,long time,String source) throws Exception {
         // Both official and explicitly trusted repository updates replace complete datasets.
         Snapshot next=parse(roots,status,time,source);
         Set<String> added=new HashSet<>(next.keys());added.removeAll(current.keys());
@@ -235,6 +325,7 @@ public final class OfficialData {
         return "顺序：" + priorityLabel(context) + "\nMirror: " + MIRROR_MANIFEST + "\n信任模式：完全信任指定仓库；镜像无签名，可自动更新根公钥集合\nRoots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
             + "\n官方抓取时间: " + (s.fetchedAt() == 0 ? "Bundled; not online-verified" : new Date(s.fetchedAt()))
             + "\nFresh (<24h): " + isFresh() + "\nRoot keys: " + s.keys().size()
+            + "\n更新状态：" + updateStatus() + "\n阶段耗时：\n" + timing
             + "\n更新差异：" + lastChange
             + "\nLast update error: " + (lastError.isEmpty() ? "None" : lastError)
             + "\n仅下载公开信任数据，不上传证书或设备标识。离线/过期数据不能证明当前未撤销。";

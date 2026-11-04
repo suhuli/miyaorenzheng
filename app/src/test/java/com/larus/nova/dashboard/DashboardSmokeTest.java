@@ -95,12 +95,33 @@ public class DashboardSmokeTest {
         }
     }
 
-    @Test public void manualRefreshWhileUpdatingQueuesASecondCheck() throws Exception {
+    @Test public void manualRefreshWhileUpdatingIsMerged() throws Exception {
         try(var c=activity()) {
             var busy=DashboardActivity.class.getDeclaredField("updating");busy.setAccessible(true);busy.setBoolean(c.get(),true);
             var refresh=DashboardActivity.class.getDeclaredMethod("refresh",boolean.class);refresh.setAccessible(true);refresh.invoke(c.get(),true);
+            var pending=DashboardActivity.class.getDeclaredField("refreshPending");pending.setAccessible(true);assertFalse(pending.getBoolean(c.get()));
+        }
+    }
+
+    @Test public void priorityChangeWhileUpdatingStillQueuesRecheck() throws Exception {
+        try(var c=activity()) {
+            var busy=DashboardActivity.class.getDeclaredField("updating");busy.setAccessible(true);busy.setBoolean(c.get(),true);
+            var refresh=DashboardActivity.class.getDeclaredMethod("refreshForPriorityChange");refresh.setAccessible(true);refresh.invoke(c.get());
             var pending=DashboardActivity.class.getDeclaredField("refreshPending");pending.setAccessible(true);assertTrue(pending.getBoolean(c.get()));
         }
+    }
+    @Test public void updatingButtonIsDisabledAndProgressVisible() throws Exception {
+        try(var c=activity()) {
+            var busy=DashboardActivity.class.getDeclaredField("updating");busy.setAccessible(true);busy.setBoolean(c.get(),true);
+            var root=c.get().getWindow().getDecorView();find(root,BottomNavigationView.class).setSelectedItemId(4);
+            assertNotNull(findButton(root,"更新中…"));assertFalse(findButton(root,"更新中…").isEnabled());
+            assertTrue(containsText(root,OfficialData.updateStatus()));
+        }
+    }
+    private TextView findButton(View view,String label) {
+        if(view instanceof com.google.android.material.button.MaterialButton b && b.getText().toString().equals(label))return b;
+        if(view instanceof ViewGroup g)for(int i=0;i<g.getChildCount();i++){TextView b=findButton(g.getChildAt(i),label);if(b!=null)return b;}
+        return null;
     }
 
     public static class SyntheticData extends com.larus.nova.repository.BaseData {

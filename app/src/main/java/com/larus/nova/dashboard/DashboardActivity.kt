@@ -50,6 +50,20 @@ open class DashboardActivity : AppCompatActivity() {
     private var tab = 1
     private var loading = true
     private var updating = false
+    private var updateStatusView: TextView? = null
+    private val updateHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val updateTicker = object : Runnable {
+        override fun run() {
+            if (updating) {
+                updateStatusView?.text = OfficialData.updateStatus()
+                updateHandler.postDelayed(this, 300)
+            }
+        }
+    }
+    override fun onDestroy() {
+        updateHandler.removeCallbacks(updateTicker)
+        super.onDestroy()
+    }
     private var refreshPending = false
     private var error: String? = null
     private var source = "本机生成"
@@ -183,11 +197,11 @@ open class DashboardActivity : AppCompatActivity() {
         action?.let { card.isClickable = true; card.isFocusable = true; card.setOnClickListener { it() } }
         return box
     }
-    private fun button(parent: LinearLayout, label: String, secondary: Boolean = false, action: () -> Unit) {
+    private fun button(parent: LinearLayout, label: String, secondary: Boolean = false, action: () -> Unit): MaterialButton {
         val b = if (secondary) MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle) else MaterialButton(this)
         b.text = label; b.cornerRadius = dp(14); b.isAllCaps = false
         b.minHeight = dp(48); b.setOnClickListener { action() }
-        parent.addView(b, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        parent.addView(b, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) }); return b
     }
     private fun row(parent: LinearLayout, title: String, value: String, tint: Int = R.color.dash_text) {
         val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.TOP; setPadding(0, dp(9), 0, dp(9)) }
@@ -197,6 +211,7 @@ open class DashboardActivity : AppCompatActivity() {
     }
     private fun render() {
         if (!::page.isInitialized) return
+        updateStatusView = null
         page.removeAllViews(); progress.visibility = if (loading || updating) View.VISIBLE else View.INVISIBLE
         when (tab) { 1 -> overview(); 2 -> chain(); 3 -> history(); 4 -> settings() }
     }
@@ -267,7 +282,7 @@ open class DashboardActivity : AppCompatActivity() {
         actionRow.addView(refreshButton, LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginEnd = dp(8) })
         actionRow.addView(detailButton, LinearLayout.LayoutParams(0, dp(52), 1f))
         page.addView(actionRow)
-        page.addView(text(if (updating) "数据更新中…" else "${OfficialData.source()} · ${if (OfficialData.fetchedAt() == 0L) "未更新" else date(OfficialData.fetchedAt())}", 11, false, R.color.dash_muted).apply { setPadding(0, dp(12), 0, 0) })
+        page.addView(text(if (updating) OfficialData.updateStatus() else "${OfficialData.source()} · ${if (OfficialData.fetchedAt() == 0L) "未更新" else date(OfficialData.fetchedAt())}", 11, false, R.color.dash_muted).apply { setPadding(0, dp(12), 0, 0); if (updating) updateStatusView = this })
     }
     private fun chain() {
         heading("证书链", "从信任根到目标密钥 · 每条连接单独验证")
@@ -388,7 +403,8 @@ open class DashboardActivity : AppCompatActivity() {
         row(data, "信任根公钥", OfficialData.rootCount().toString())
         row(data, "撤销条目", OfficialData.entryCount().toString())
         row(data, "数据抓取时间", if (OfficialData.fetchedAt() == 0L) "未在线确认" else date(OfficialData.fetchedAt()))
-        button(data, if (updating) "更新中…" else "立即更新数据") { refresh(true) }
+        button(data, if (updating) "更新中…" else "立即更新数据") { refresh(true) }.isEnabled = !updating
+        data.addView(text(OfficialData.updateStatus(), 12, false, R.color.dash_muted).also { updateStatusView = it })
         if (OfficialData.error().isNotEmpty()) row(data, "更新提示", OfficialData.error())
         button(data, "更新详情", true) { message("数据来源与更新记录", OfficialData.describe(this@DashboardActivity)) }
         button(data, "导出公开数据包", true) {
@@ -404,10 +420,10 @@ open class DashboardActivity : AppCompatActivity() {
                 .setSingleChoiceItems(labels, values.indexOf(OfficialData.priority(this))) { dialog, index ->
                     prefs.edit().putString(com.larus.nova.attestation.DataSourcePolicy.KEY, values[index]).apply()
                     dialog.dismiss(); render()
-                    if (::model.isInitialized) refresh(true) else toast("已保存")
+                    if (::model.isInitialized) refreshForPriorityChange() else toast("已保存")
                 }.setNegativeButton("取消", null).show()
         }
-        toggle(data, "启动时检查更新", "按所选优先级更新，失败保留本地缓存。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
+        toggle(data, "启动时检查更新", "自动检查成功后间隔 5 分钟，失败后间隔 30 秒；手动更新不受此限制。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
         val privacy = card("隐私与提醒")
         toggle(privacy, "保留本地历史", "最多 30 条，可随时关闭或清空。", prefs.getBoolean("history", true)) { prefs.edit().putBoolean("history", it).apply() }
         toggle(privacy, "证书临期通知", "上次记录的 RKP 证书在 7 天内到期时提醒。", prefs.getBoolean("reminders", false)) {
@@ -433,13 +449,20 @@ open class DashboardActivity : AppCompatActivity() {
             message("关于与限制", "上游：vvb2060/KeyAttestation\n社区仓库：suhuli/miyaorenzheng\n\n本机受控环境可能篡改解析和显示。最终安全决定应在独立可信环境中验证。\n原有主动 RKP 工具需要 Shizuku，并在确认后向指定服务提交配置数据；普通识别无需该操作。")
         })
     }
+    private fun refreshForPriorityChange() {
+        if (updating) { refreshPending = true; return }
+        refresh(true)
+    }
     private fun refresh(force: Boolean) {
-        if (updating) { if (force) refreshPending = true; return }
+        if (updating) return
         updating = true; render()
+        updateHandler.removeCallbacks(updateTicker); updateHandler.post(updateTicker)
         AppApplication.officialExecutor.execute {
             val success = OfficialData.refresh(applicationContext, force)
             runOnUiThread {
                 updating = false
+                updateHandler.removeCallbacks(updateTicker)
+                if (isDestroyed) return@runOnUiThread
                 if (refreshPending) { refreshPending = false; refresh(true); return@runOnUiThread }
                 current?.revalidate(); render()
                 if (force) toast(if (success) "数据检查完成 · ${OfficialData.source()}" else "更新失败，保留旧快照；详情见设置")
