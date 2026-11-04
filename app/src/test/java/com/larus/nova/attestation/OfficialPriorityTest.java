@@ -143,4 +143,44 @@ public class OfficialPriorityTest {
         assertTrue(refresh(d));calls.clear();assertTrue(refresh(d));
         assertEquals(List.of(OfficialData.MIRROR_MANIFEST),calls);
     }
+
+    @Test public void explicitMirrorPreferenceCanReplaceMoreRecentlyFetchedOfficialData() throws Exception {
+        String r=roots();long time=System.currentTimeMillis()-3600000;
+        accept(r,status("bb"),System.currentTimeMillis(),"Google 官方直连");mirrorFirst();
+        assertTrue(refresh(mirror(r,status("aa"),time)));
+        assertTrue(OfficialData.source().contains("jsDelivr"));assertEquals(time,OfficialData.fetchedAt());
+        assertTrue(OfficialData.entries().has("aa"));assertFalse(OfficialData.entries().has("bb"));
+        assertFalse(calls.contains(OfficialData.ROOT_URL));
+    }
+    @Test public void preferredMirrorStillCannotRollBackPreviouslyAcceptedMirrorVersion() throws Exception {
+        String r=roots();long time=System.currentTimeMillis()-1000;
+        accept(r,status("bb"),time,"仓库镜像 · jsDelivr");mirrorFirst();
+        assertFalse(refresh(mirror(r,status("aa"),time-1000)));
+        assertEquals(time,OfficialData.fetchedAt());assertTrue(OfficialData.entries().has("bb"));
+    }
+    @Test public void explicitMirrorPreferenceStillRejectsExpiredMirrorAndUsesOfficial() throws Exception {
+        String r=roots();var d=mirror(r,status("bb"),System.currentTimeMillis()-25*3600000L);mirrorFirst();
+        assertTrue(refresh(url->{if(url.equals(OfficialData.ROOT_URL))return r;
+            if(url.equals(OfficialData.STATUS_URL))return status("aa");return d.get(url);}));
+        assertEquals("Google 官方直连",OfficialData.source());assertFalse(OfficialData.entries().has("bb"));
+    }
+    @Test public void switchingBackToOfficialDoesNotReuseMirrorPreference() throws Exception {
+        String r=roots();long mirrorTime=System.currentTimeMillis()-3600000;
+        accept(r,status("bb"),System.currentTimeMillis(),"Google 官方直连");mirrorFirst();
+        assertTrue(refresh(mirror(r,status("aa"),mirrorTime)));
+        RuntimeEnvironment.getApplication().getSharedPreferences("dashboard",0).edit().putString(DataSourcePolicy.KEY,DataSourcePolicy.OFFICIAL_FIRST).commit();
+        calls.clear();assertTrue(refresh(url->url.equals(OfficialData.ROOT_URL)?r:status("cc")));
+        assertEquals(OfficialData.ROOT_URL,calls.get(0));assertEquals("Google 官方直连",OfficialData.source());assertFalse(OfficialData.entries().has("aa"));
+    }
+
+    @Test public void mirrorRollbackGuardSurvivesOfficialSwitchAndCacheReload() throws Exception {
+        String r=roots();long time=System.currentTimeMillis()-3600000;mirrorFirst();
+        assertTrue(refresh(mirror(r,status("aa"),time)));
+        RuntimeEnvironment.getApplication().getSharedPreferences("dashboard",0).edit().putString(DataSourcePolicy.KEY,DataSourcePolicy.OFFICIAL_FIRST).commit();
+        assertTrue(refresh(url->url.equals(OfficialData.ROOT_URL)?r:status("bb")));
+        var f=OfficialData.class.getDeclaredField("current");f.setAccessible(true);f.set(null,null);
+        OfficialData.initialize(RuntimeEnvironment.getApplication());mirrorFirst();calls.clear();
+        assertFalse(refresh(mirror(r,status("cc"),time-1000)));
+        assertEquals("Google 官方直连",OfficialData.source());assertTrue(OfficialData.entries().has("bb"));
+    }
 }

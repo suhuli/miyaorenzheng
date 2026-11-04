@@ -50,6 +50,7 @@ open class DashboardActivity : AppCompatActivity() {
     private var tab = 1
     private var loading = true
     private var updating = false
+    private var refreshPending = false
     private var error: String? = null
     private var source = "本机生成"
     private var pendingText = ""
@@ -382,11 +383,13 @@ open class DashboardActivity : AppCompatActivity() {
     }
     private fun settings() {
         heading("设置", "清楚知道数据从哪里来、保存在哪里。")
-        val data = card("信任数据", "${OfficialData.source()} · ${if (OfficialData.isFresh()) "有效" else "过期 / 未更新"}")
+        val data = card("信任数据", if (OfficialData.isFresh()) "有效" else "过期 / 未更新")
+        row(data, "当前数据来源", OfficialData.source())
         row(data, "信任根公钥", OfficialData.rootCount().toString())
         row(data, "撤销条目", OfficialData.entryCount().toString())
-        row(data, "上次拉取", if (OfficialData.fetchedAt() == 0L) "未在线确认" else date(OfficialData.fetchedAt()))
+        row(data, "数据抓取时间", if (OfficialData.fetchedAt() == 0L) "未在线确认" else date(OfficialData.fetchedAt()))
         button(data, if (updating) "更新中…" else "立即更新数据") { refresh(true) }
+        if (OfficialData.error().isNotEmpty()) row(data, "更新提示", OfficialData.error())
         button(data, "更新详情", true) { message("数据来源与更新记录", OfficialData.describe(this@DashboardActivity)) }
         button(data, "导出公开数据包", true) {
             runCatching { pendingText = OfficialData.exportBundle(); saveText.launch("nova-trust-data.json") }.onFailure { toast(it.message ?: "导出失败") }
@@ -400,7 +403,8 @@ open class DashboardActivity : AppCompatActivity() {
             MaterialAlertDialogBuilder(this).setTitle("数据源优先级")
                 .setSingleChoiceItems(labels, values.indexOf(OfficialData.priority(this))) { dialog, index ->
                     prefs.edit().putString(com.larus.nova.attestation.DataSourcePolicy.KEY, values[index]).apply()
-                    dialog.dismiss(); render(); toast("已保存，下次更新生效")
+                    dialog.dismiss(); render()
+                    if (::model.isInitialized) refresh(true) else toast("已保存")
                 }.setNegativeButton("取消", null).show()
         }
         toggle(data, "启动时检查更新", "按所选优先级更新，失败保留本地缓存。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
@@ -430,11 +434,16 @@ open class DashboardActivity : AppCompatActivity() {
         })
     }
     private fun refresh(force: Boolean) {
-        if (updating) return
+        if (updating) { if (force) refreshPending = true; return }
         updating = true; render()
         AppApplication.officialExecutor.execute {
             val success = OfficialData.refresh(applicationContext, force)
-            runOnUiThread { updating = false; current?.revalidate(); render(); if (force) toast(if (success) "数据检查完成 · ${OfficialData.source()}" else "更新失败，保留旧快照；详情见设置") }
+            runOnUiThread {
+                updating = false
+                if (refreshPending) { refreshPending = false; refresh(true); return@runOnUiThread }
+                current?.revalidate(); render()
+                if (force) toast(if (success) "数据检查完成 · ${OfficialData.source()}" else "更新失败，保留旧快照；详情见设置")
+            }
         }
     }
     private fun exportReport(redacted: Boolean) {

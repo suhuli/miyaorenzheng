@@ -94,4 +94,12 @@ public class DashboardSmokeTest {
             assertEquals(com.larus.nova.attestation.DataSourcePolicy.OFFICIAL_FIRST,OfficialData.priority(c.get()));
         }
     }
+
+    @Test public void manualRefreshWhileUpdatingQueuesASecondCheck() throws Exception {
+        try(var c=activity()) {
+            var busy=DashboardActivity.class.getDeclaredField("updating");busy.setAccessible(true);busy.setBoolean(c.get(),true);
+            var refresh=DashboardActivity.class.getDeclaredMethod("refresh",boolean.class);refresh.setAccessible(true);refresh.invoke(c.get(),true);
+            var pending=DashboardActivity.class.getDeclaredField("refreshPending");pending.setAccessible(true);assertTrue(pending.getBoolean(c.get()));
+        }
+    }
 }

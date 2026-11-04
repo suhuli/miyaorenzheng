@@ -22,6 +22,7 @@ public final class OfficialData {
     private static volatile Snapshot current;
     private static volatile String lastError = "";
     private static String rawRoots, rawStatus;
+    private static long latestMirrorFetchedAt;
     private static String lastChange = "尚无在线更新记录";
     public static long fetchedAt() { return current.fetchedAt(); }
     public static String source() { return current.source(); }
@@ -65,6 +66,7 @@ public final class OfficialData {
     }
     public static synchronized void initialize(Context context) {
         if (current != null) return;
+        latestMirrorFetchedAt = 0;
         try (InputStream r = context.getResources().openRawResource(R.raw.roots);
              InputStream s = context.getResources().openRawResource(R.raw.status)) {
             rawRoots = read(r); rawStatus = read(s);
@@ -78,6 +80,8 @@ public final class OfficialData {
                 Snapshot candidate = parse(cache.getString("roots"), cache.getString("status"),
                     cache.getLong("time"), cache.optString("source", "官方 HTTPS 缓存"));
                 current = candidate; rawRoots = cache.getString("roots"); rawStatus = cache.getString("status");
+                latestMirrorFetchedAt = Math.max(0, cache.optLong("mirror_version",
+                    candidate.source().contains("jsDelivr") ? candidate.fetchedAt() : 0));
                 lastChange = cache.optString("change", "缓存恢复，暂无差异记录");
                 if (name.equals("official-data.json")) {
                     persist(context, rawRoots, rawStatus, candidate.fetchedAt(), candidate.source(), lastChange);
@@ -117,11 +121,11 @@ public final class OfficialData {
         boolean mirrorFirst = priority(context).equals(DataSourcePolicy.MIRROR_FIRST);
         String firstError;
         try {
-            if (mirrorFirst) fetchMirror(context, downloader); else fetchOfficial(context, downloader);
+            if (mirrorFirst) fetchMirror(context, downloader, true); else fetchOfficial(context, downloader);
             lastError = ""; return true;
         } catch (Exception e) { firstError = e.getClass().getSimpleName() + ": " + e.getMessage(); }
         try {
-            if (mirrorFirst) fetchOfficial(context, downloader); else fetchMirror(context, downloader);
+            if (mirrorFirst) fetchOfficial(context, downloader); else fetchMirror(context, downloader, false);
             lastError = (mirrorFirst ? "镜像不可用，已回退 Google 官方：" : "官方不可用，已使用 jsDelivr：") + firstError;
             return true;
         } catch (Exception e) {
@@ -136,13 +140,19 @@ public final class OfficialData {
         // A complete valid official response is authoritative, regardless of mirror timestamps.
         accept(context, roots, status, System.currentTimeMillis(), "Google 官方直连");
     }
-    private static void fetchMirror(Context context, Downloader downloader) throws Exception {
+    private static void fetchMirror(Context context, Downloader downloader, boolean explicitlyPreferred) throws Exception {
         long now = System.currentTimeMillis();
         MirrorManifest manifest = MirrorManifest.parse(downloader.get(MIRROR_MANIFEST), now);
         if (now - manifest.fetchedAt() > MAX_AGE || manifest.fetchedAt() > now)
             throw new IOException("Mirror snapshot is stale or from the future");
-        if (manifest.fetchedAt() < current.fetchedAt())
-            throw new IOException("CDN snapshot older than local data");
+        // Fetch timestamps from different sources are NOT comparable version numbers.
+        // An explicit mirror preference may replace newer direct-Google data with a valid
+        // <=24h mirror snapshot. Preserve the original age. Never roll back mirror-to-mirror.
+        if (manifest.fetchedAt() < latestMirrorFetchedAt)
+            throw new IOException("CDN 返回已接受镜像之前的旧版本");
+        boolean switchingFromOfficial = explicitlyPreferred && current.source().equals("Google 官方直连");
+        if (manifest.fetchedAt() < current.fetchedAt() && !switchingFromOfficial)
+            throw new IOException("镜像早于当前缓存，保留较新数据");
         if (manifest.fetchedAt() != current.fetchedAt() || !current.source().contains("jsDelivr")) {
             String body = downloader.get(MIRROR_BASE + manifest.path()); manifest.check(body);
             JSONObject bundle = new JSONObject(body);
@@ -159,6 +169,7 @@ public final class OfficialData {
             +"；撤销条目："+current.entries().length()+" → "+next.entries().length()
             +"\n新增根 SPKI SHA-256："+fingerprints(added)+"\n移除根 SPKI SHA-256："+fingerprints(removed);
         persist(context,roots,status,time,source,change);
+        if (source.contains("jsDelivr")) latestMirrorFetchedAt = Math.max(latestMirrorFetchedAt, time);
         rawRoots=roots;rawStatus=status;lastChange=change;current=next;
     }
     private static String fingerprints(Set<String> keys) throws Exception {
@@ -172,7 +183,9 @@ public final class OfficialData {
     }
     private static void persist(Context context,String roots,String status,long time,String source,String change) throws Exception {
         byte[] bytes = new JSONObject().put("roots",roots).put("status",status).put("time",time)
-            .put("source",source).put("change",change).toString().getBytes(StandardCharsets.UTF_8);
+            .put("source",source).put("change",change)
+            .put("mirror_version", Math.max(latestMirrorFetchedAt, source.contains("jsDelivr") ? time : 0))
+            .toString().getBytes(StandardCharsets.UTF_8);
         if (bytes.length>MAX_BYTES) throw new IOException("Bundle too large");
         android.util.AtomicFile file = new android.util.AtomicFile(new File(context.getFilesDir(),"trust-store.json"));
         FileOutputStream out = null;
