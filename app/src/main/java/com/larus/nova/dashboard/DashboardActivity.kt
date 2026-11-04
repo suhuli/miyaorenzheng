@@ -256,15 +256,15 @@ open class DashboardActivity : AppCompatActivity() {
         row(cert, "有效期", when { data.certs.any { it.isLegacyExpiredAccepted } -> "旧证书兼容"; data.certs.any { it.cert.notAfter.time < now || it.cert.notBefore.time > now } -> "异常"; else -> "正常" })
         row(cert, "撤销检查", fields.getString("撤销检查"))
         rkpExpiry(data)?.let { row(cert, "RKP 到期", date(it), if (it - now < 7L * 86400000) R.color.dash_warning else R.color.dash_text) }
-        provisioningCard(data.certs.mapIndexedNotNull { index, info ->
-            if (info.cert.getExtensionValue("1.3.6.1.4.1.11129.2.1.30") != null)
-                Pair(index + 1, info.provisioningInfo) else null
-        })
         val device = card("设备")
         row(device, "证明级别", att?.let { Attestation.securityLevelToString(it.attestationSecurityLevel) } ?: "未提供")
         row(device, "启动锁", trust?.let { if (it.isDeviceLocked) "已锁定" else "未锁定" } ?: "未提供")
         row(device, "启动状态", trust?.let { RootOfTrust.verifiedBootStateToString(it.verifiedBootState) } ?: "未提供")
         row(device, "安全补丁", att?.teeEnforced?.osPatchLevel?.toString() ?: "未提供")
+        provisioningCard(data.certs.mapIndexedNotNull { index, info ->
+            if (info.cert.getExtensionValue("1.3.6.1.4.1.11129.2.1.30") != null)
+                Pair(index + 1, info.provisioningInfo) else null
+        })
         val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val refreshButton = MaterialButton(this).apply { text = "重新检测"; cornerRadius = dp(14); setOnClickListener { source = "本机生成"; model.load() } }
         val detailButton = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply { text = "查看证书"; cornerRadius = dp(14); setOnClickListener { navigation.selectedItemId = 2 } }
@@ -289,7 +289,12 @@ open class DashboardActivity : AppCompatActivity() {
                 row(box, "遗失设备字段", info.lostDevice?.let { if (it) "标记为遗失设备" else "未标记（非实时）" } ?: "未提供",
                     if (info.lostDevice == true) R.color.dash_error else R.color.dash_text)
                 info.manufacturer?.let { row(box, "制造商（旧字段）", it) }
-                if (info.unknownFields.isNotEmpty()) row(box, "其他字段", "${info.unknownFields.size} 项")
+                if (info.extraFields.isNotEmpty()) {
+                    info.extraFields.forEach { field -> row(box, "字段 ${field.path()} · ${field.type()}", field.value()) }
+                    box.addView(text("附加字段的业务含义尚未确认，保留原文。", 12, false, R.color.dash_muted))
+                } else {
+                    info.unknownFields.forEach { (key, value) -> row(box, "字段 $key", value) }
+                }
                 button(box, "查看第 $position 张配置详情", true) { message("配置扩展", info.describe()) }
             }
         }

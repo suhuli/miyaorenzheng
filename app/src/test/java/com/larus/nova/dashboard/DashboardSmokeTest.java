@@ -117,12 +117,21 @@ public class DashboardSmokeTest {
     }
     @Test public void homeConfigCardShowsFieldsAndLostFlag() throws Exception {
         try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.certsIssued=123L;fields.validatedAttestedEntity="TEE";fields.lostDevice=true;fields.manufacturer="Vendor";fields.unknown.put("99","future");configCard(c.get(),fields,false);
-            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"123"));assertTrue(containsText(root,"TEE"));assertTrue(containsText(root,"标记为遗失设备"));assertTrue(containsText(root,"Vendor"));assertTrue(containsText(root,"1 项"));assertTrue(containsText(root,"查看第 2 张配置详情"));}
+            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"123"));assertTrue(containsText(root,"TEE"));assertTrue(containsText(root,"标记为遗失设备"));assertTrue(containsText(root,"Vendor"));assertTrue(containsText(root,"字段 99"));assertTrue(containsText(root,"future"));assertTrue(containsText(root,"查看第 2 张配置详情"));}
     }
     @Test public void homeConfigCardDoesNotTreatMissingLostFlagAsFalse() throws Exception {
         try(var c=activity()){configCard(c.get(),new com.larus.nova.attestation.ProvisioningFields(),false);var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"未提供"));assertFalse(containsText(root,"未标记（非实时）"));}
     }
     @Test public void homeConfigCardExplicitFalseIsNotRealTimeSafetyClaim() throws Exception {
         try(var c=activity()){var fields=new com.larus.nova.attestation.ProvisioningFields();fields.lostDevice=false;configCard(c.get(),fields,false);assertTrue(containsText(c.get().getWindow().getDecorView(),"未标记（非实时）"));}
+    }
+
+    @Test public void homeConfigCardShowsNestedFieldPathsAndCompleteValues() throws Exception {
+        var child=new co.nstant.in.cbor.model.Map();child.put(new co.nstant.in.cbor.model.UnsignedInteger(1),new co.nstant.in.cbor.model.UnicodeString("APPROVED"));
+        String synthetic="ab".repeat(32);child.put(new co.nstant.in.cbor.model.UnsignedInteger(2),new co.nstant.in.cbor.model.UnicodeString(synthetic));
+        var map=new co.nstant.in.cbor.model.Map();map.put(new co.nstant.in.cbor.model.UnsignedInteger(5),child);
+        var out=new java.io.ByteArrayOutputStream();new co.nstant.in.cbor.CborEncoder(out).encode(map);
+        try(var c=activity()){configCard(c.get(),com.larus.nova.attestation.ProvisioningFields.parse(out.toByteArray()),false);
+            var root=c.get().getWindow().getDecorView();assertTrue(containsText(root,"字段 5.1 · 文本"));assertTrue(containsText(root,"APPROVED"));assertTrue(containsText(root,"字段 5.2 · 文本"));assertTrue(containsText(root,synthetic));assertFalse(containsText(root,"SHA-256"));}
     }
 }
