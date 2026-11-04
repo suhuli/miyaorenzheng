@@ -19,4 +19,10 @@
         <item name="android:windowLightNavigationBar">true</item>
         <item name="android:fontFamily">sans</item>
     </style>
+<color name="verdict_good_bg">#E2F4E9</color>
+<color name="verdict_good_fg">#0B6042</color>
+<color name="verdict_warn_bg">#FFF1D6</color>
+<color name="verdict_warn_fg">#7D5000</color>
+<color name="verdict_bad_bg">#FDE9E6</color>
+<color name="verdict_bad_fg">#A1231D</color>
 </resources>

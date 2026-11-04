@@ -23,8 +23,8 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 35
-        versionCode = 210
-        versionName = '2.1.0-community'
+        versionCode = 220
+        versionName = '2.2.0-community'
         applicationIdSuffix = '.community.fix'
         resourceConfigurations += ['en', 'zh-rCN', 'zh-rTW', 'pt-rBR']
         optimization {

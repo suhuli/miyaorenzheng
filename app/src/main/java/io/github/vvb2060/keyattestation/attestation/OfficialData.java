@@ -11,8 +11,10 @@ import java.util.*;
 import javax.net.ssl.HttpsURLConnection;
 import io.github.vvb2060.keyattestation.R;
 
-/** Only fixed official HTTPS endpoints; never uploads device or certificate data. */
+/** Fixed trusted repository mirror first, official HTTPS fallback. No device uploads. */
 public final class OfficialData {
+    public static final String MIRROR_BASE = "https://cdn.jsdelivr.net/gh/suhuli/miyaorenzheng@data/";
+    public static final String MIRROR_MANIFEST = MIRROR_BASE + "manifest.json";
     public static final String ROOT_URL = "https://android.googleapis.com/attestation/root";
     public static final String STATUS_URL = "https://android.googleapis.com/attestation/status";
     private static final long MAX_AGE = 24L * 60 * 60 * 1000;
@@ -79,9 +81,10 @@ public final class OfficialData {
     }
     private static String download(String url) throws IOException {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(15000); c.setReadTimeout(20000);
+        c.setConnectTimeout(6000); c.setReadTimeout(10000);
         c.setInstanceFollowRedirects(false);
         c.setRequestProperty("Accept", "application/json");
+        c.setRequestProperty("Cache-Control", "no-cache");
         try {
             if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
             try (InputStream in = c.getInputStream()) { return read(in); }
@@ -89,23 +92,43 @@ public final class OfficialData {
     }
     public static synchronized boolean refresh(Context context, boolean force) {
         initialize(context);
-        if (!force && isFresh()) return true;
+        String mirrorError;
         try {
-            String roots = download(ROOT_URL), status = download(STATUS_URL);
-            long now = System.currentTimeMillis();
-            Snapshot next = parse(roots, status, now, "官方 HTTPS 缓存");
-            Set<String> added = new HashSet<>(next.keys()); added.removeAll(current.keys());
-            Set<String> removed = new HashSet<>(current.keys()); removed.removeAll(next.keys());
-            String change = "根公钥：新增 " + added.size() + "，移除 " + removed.size()
-                + "；撤销条目：" + current.entries().length() + " → " + next.entries().length()
-                + "\n新增根 SPKI SHA-256：" + fingerprints(added)
-                + "\n移除根 SPKI SHA-256：" + fingerprints(removed);
-            persist(context, roots, status, now, next.source(), change);
-            rawRoots = roots; rawStatus = status; lastChange = change;
-            current = next; lastError = ""; return true;
-        } catch (Exception e) {
-            lastError = e.getClass().getSimpleName() + ": " + e.getMessage(); return false;
+            MirrorManifest manifest=MirrorManifest.parse(download(MIRROR_MANIFEST),System.currentTimeMillis());
+            if(manifest.fetchedAt()<current.fetchedAt()) {
+                // Never replace a newer local official/mirror snapshot with an older CDN response.
+                if(isFresh()) {lastError="CDN 返回较旧版本，继续使用较新的本地快照";return true;}
+                throw new IOException("CDN snapshot older than local data");
+            }
+            if(manifest.fetchedAt()==current.fetchedAt() && current.source().contains("jsDelivr")) {
+                if(isFresh()){lastError="";return true;}
+                throw new IOException("Mirror snapshot is older than 24 hours");
+            }
+            String body=download(MIRROR_BASE+manifest.path());manifest.check(body);
+            JSONObject bundle=new JSONObject(body);
+            accept(context,bundle.getJSONArray("roots").toString(),bundle.getJSONObject("status").toString(),
+                manifest.fetchedAt(),"仓库镜像 · jsDelivr");
+            if(isFresh()){lastError="";return true;}
+            throw new IOException("Mirror snapshot is older than 24 hours");
+        } catch(Exception e) {mirrorError=e.getClass().getSimpleName()+": "+e.getMessage();}
+        try {
+            String roots=download(ROOT_URL),status=download(STATUS_URL);
+            accept(context,roots,status,System.currentTimeMillis(),"Google 官方直连");
+            lastError="镜像不可用，已回退官方："+mirrorError;return true;
+        } catch(Exception e) {
+            lastError="镜像："+mirrorError+"\n官方："+e.getClass().getSimpleName()+": "+e.getMessage();return false;
         }
+    }
+    private static void accept(Context context,String roots,String status,long time,String source) throws Exception {
+        // Trust all root additions/removals in the configured repository, as explicitly selected by owner.
+        Snapshot next=parse(roots,status,time,source);
+        Set<String> added=new HashSet<>(next.keys());added.removeAll(current.keys());
+        Set<String> removed=new HashSet<>(current.keys());removed.removeAll(next.keys());
+        String change="根公钥：新增 "+added.size()+"，移除 "+removed.size()
+            +"；撤销条目："+current.entries().length()+" → "+next.entries().length()
+            +"\n新增根 SPKI SHA-256："+fingerprints(added)+"\n移除根 SPKI SHA-256："+fingerprints(removed);
+        persist(context,roots,status,time,source,change);
+        rawRoots=roots;rawStatus=status;lastChange=change;current=next;
     }
     private static String fingerprints(Set<String> keys) throws Exception {
         var result = new ArrayList<String>();
@@ -157,8 +180,8 @@ public final class OfficialData {
     public static JSONObject entries() { return current.entries(); }
     public static String describe() {
         Snapshot s = current;
-        return "Roots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
-            + "\nFetched: " + (s.fetchedAt() == 0 ? "Bundled; not online-verified" : new Date(s.fetchedAt()))
+        return "Mirror: " + MIRROR_MANIFEST + "\n信任模式：完全信任指定仓库；镜像无签名，可自动更新根公钥集合\nRoots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
+            + "\n官方抓取时间: " + (s.fetchedAt() == 0 ? "Bundled; not online-verified" : new Date(s.fetchedAt()))
             + "\nFresh (<24h): " + isFresh() + "\nRoot keys: " + s.keys().size()
             + "\n更新差异：" + lastChange
             + "\nLast update error: " + (lastError.isEmpty() ? "None" : lastError)

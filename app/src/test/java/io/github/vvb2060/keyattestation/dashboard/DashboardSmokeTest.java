@@ -18,7 +18,9 @@ import static org.junit.Assert.*;
 @Config(sdk=35,application=DashboardSmokeTest.TestApp.class)
 public class DashboardSmokeTest {
     public static class TestApp extends Application {
-        @Override public void onCreate() { super.onCreate(); OfficialData.initialize(this); }
+        @Override public void onCreate() { super.onCreate();
+            try {var f=OfficialData.class.getDeclaredField("current");f.setAccessible(true);f.set(null,null);} catch(Exception e){throw new RuntimeException(e);}
+            OfficialData.initialize(this); }
     }
     public static class SmokeActivity extends DashboardActivity {
         @Override protected void attachModel() { /* no hardware or network in UI smoke */ }
@@ -45,8 +47,19 @@ public class DashboardSmokeTest {
         try(var c=activity()) {var root=c.get().getWindow().getDecorView();var nav=find(root,BottomNavigationView.class);
             nav.setSelectedItemId(2);assertTrue(containsText(root,"暂无可显示的链"));
             nav.setSelectedItemId(3);assertTrue(containsText(root,"本地记录"));
-            nav.setSelectedItemId(4);assertTrue(containsText(root,"官方信任数据"));assertTrue(containsText(root,"严格有效期模式"));
-            nav.setSelectedItemId(1);assertTrue(containsText(root,"看清每一层信任"));
+            nav.setSelectedItemId(4);assertTrue(containsText(root,"信任数据"));assertTrue(containsText(root,"严格有效期模式"));
+            nav.setSelectedItemId(1);assertTrue(containsText(root,"检测中"));
+        }
+    }
+    @Test public void resultStatesAreVisibleAndSloganRemoved() throws Exception {
+        try(var c=activity()) {
+            var method=DashboardActivity.class.getDeclaredMethod("resultCard",String.class,String.class,int.class,boolean.class);method.setAccessible(true);
+            var root=c.get().getWindow().getDecorView();
+            method.invoke(c.get(),"证书正常","四项检查通过",0,false);
+            method.invoke(c.get(),"证书异常","签名失败",2,false);
+            method.invoke(c.get(),"待确认","数据过期",1,false);
+            assertTrue(containsText(root,"证书正常"));assertTrue(containsText(root,"证书异常"));assertTrue(containsText(root,"待确认"));
+            assertFalse(containsText(root,"看清每一层信任"));
         }
     }
     @Test public void darkConfigurationLaunches() {

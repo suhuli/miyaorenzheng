@@ -44,6 +44,7 @@ open class DashboardActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("dashboard", MODE_PRIVATE) }
     private lateinit var model: HomeViewModel
     private lateinit var page: LinearLayout
+    private lateinit var navigation: BottomNavigationView
     private lateinit var progress: LinearProgressIndicator
     private var current: BaseData? = null
     private var tab = 1
@@ -100,9 +101,8 @@ open class DashboardActivity : AppCompatActivity() {
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(22), dp(16), dp(22), dp(12)) }
         val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         brand.addView(text("密钥认证", 23, true))
-        brand.addView(text("KEY ATTESTATION · COMMUNITY", 10, false, R.color.dash_muted).apply { letterSpacing = .12f })
         top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(text("本机诊断", 12, true, R.color.dash_accent).apply {
+        top.addView(text("2.2", 12, true, R.color.dash_accent).apply {
             setPadding(dp(12), dp(8), dp(12), dp(8)); background = rounded(R.color.dash_accent_soft, 20)
             contentDescription = "本机诊断，不是服务端设备完整性认证"
         })
@@ -121,6 +121,7 @@ open class DashboardActivity : AppCompatActivity() {
             selectedItemId = tab
             setOnItemSelectedListener { tab = it.itemId; render(); scroll.scrollTo(0, 0); true }
         }
+        navigation = bottom
         root.addView(bottom); setContentView(root)
         attachModel()
         render()
@@ -156,6 +157,7 @@ open class DashboardActivity : AppCompatActivity() {
             model.preferAttestKey = options.getBoolean("prefer_attest_key", true)
         }
         if (::page.isInitialized) { current?.revalidate(); render() }
+        if (::model.isInitialized && prefs.getBoolean("auto_update", true)) refresh(false)
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private fun color(id: Int) = ContextCompat.getColor(this, id)
@@ -165,7 +167,7 @@ open class DashboardActivity : AppCompatActivity() {
         if (bold) setTypeface(typeface, Typeface.BOLD)
     }
     private fun heading(title: String, subtitle: String) {
-        page.addView(text(title, 27, true)); page.addView(text(subtitle, 13, false, R.color.dash_muted).apply { setPadding(0, dp(6), 0, dp(18)) })
+        page.addView(text(title, 23, true).apply { setPadding(0, 0, 0, dp(16)) })
     }
     private fun card(title: String, body: String? = null, action: (() -> Unit)? = null, tint: Int = R.color.dash_text): LinearLayout {
         val card = MaterialCardView(this).apply {
@@ -197,48 +199,80 @@ open class DashboardActivity : AppCompatActivity() {
         page.removeAllViews(); progress.visibility = if (loading || updating) View.VISIBLE else View.INVISIBLE
         when (tab) { 1 -> overview(); 2 -> chain(); 3 -> history(); 4 -> settings() }
     }
+    private fun resultCard(title: String, reason: String, level: Int, loadingState: Boolean = false) {
+        val bg = if (loadingState) R.color.dash_accent_soft else when (level) {
+            CertificateVerdict.NORMAL -> R.color.verdict_good_bg
+            CertificateVerdict.ERROR -> R.color.verdict_bad_bg
+            else -> R.color.verdict_warn_bg
+        }
+        val fg = if (loadingState) R.color.dash_accent else when (level) {
+            CertificateVerdict.NORMAL -> R.color.verdict_good_fg
+            CertificateVerdict.ERROR -> R.color.verdict_bad_fg
+            else -> R.color.verdict_warn_fg
+        }
+        val box = card(title, tint = fg)
+        val outer = box.parent as MaterialCardView
+        outer.setCardBackgroundColor(color(bg)); outer.strokeWidth = 0
+        box.removeAllViews()
+        val head = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        head.addView(text(if (loadingState) "···" else when (level) { 0 -> "✓"; 2 -> "×"; else -> "!" }, 42, true, fg), LinearLayout.LayoutParams(dp(62), dp(66)))
+        head.addView(text(title, 27, true, fg), LinearLayout.LayoutParams(0, -2, 1f))
+        box.addView(head)
+        box.addView(text(reason, 14, false, fg).apply { setPadding(0, dp(4), 0, dp(6)) })
+        if (!loadingState && current != null) {
+            box.addView(text("${source} · ${current!!.certs.size} 张证书  ›", 12, false, fg))
+            outer.isClickable = true; outer.isFocusable = true
+            outer.setOnClickListener { navigation.selectedItemId = 2 }
+        }
+    }
     private fun overview() {
-        heading("看清每一层信任", "密钥类型、证书验证与设备声明分别展示。")
-        if (loading) { card("正在读取设备证明", "生成密钥和硬件证明可能需要一点时间。旧结果不会冒充本次结果。"); return }
+        if (loading) { resultCard("检测中", "正在读取硬件密钥证明", 1, true); return }
         val data = current
         if (data == null) {
-            val box = card("未取得证明", error ?: "请重新检测或导入公开证书链。", tint = R.color.dash_warning)
-            button(box, "重新检测") { source = "本机生成"; model.load() }
-            button(box, "导入证书链", true) { importChain.launch("*/*") }; return
+            resultCard("检测失败", error ?: "未取得可解析的证书", CertificateVerdict.ERROR)
+            val actions = card("操作")
+            button(actions, "重新检测") { source = "本机生成"; model.load() }
+            button(actions, "导入证书", true) { importChain.launch("*/*") }; return
         }
         val fields = snapshot(data)
-        val box = card(if (data.status == RootPublicKey.Status.FAILED) "发现需要检查的项目" else "证明已解析 · 查看分项结果",
-            "$source · ${data.certs.size} 张证书\n不等于 Play Integrity 或设备绝对安全保证。")
-        row(box, "配置类型", fields.getString("配置类型"))
-        row(box, "根来源", fields.getString("根来源"))
-        row(box, "签名路径", fields.getString("签名路径"), if (data.certs.all { it.isSignatureValid }) R.color.dash_accent else R.color.dash_error)
-        row(box, "有效期策略", fields.getString("有效期策略"))
-        row(box, "撤销检查", fields.getString("撤销检查"), if (data.certs.any { it.revocation != null }) R.color.dash_error else if (OfficialData.isFresh()) R.color.dash_accent else R.color.dash_warning)
-        if (data.certs.any { it.provisioningInfo?.lostDevice == true }) {
-            card("证书携带遗失设备标记", "这是配置证书内的签发时声明。请结合链的真实性检查，不将其当作实时查询结果。", tint = R.color.dash_error)
-        }
         val att = (data as? AttestationData)?.showAttestation
         val trust = att?.rootOfTrust
-        val device = card("设备声明", "字段来自证明内容；必须结合证书链和本机环境的可信性理解。")
-        row(device, "安全级别", att?.let { Attestation.securityLevelToString(it.attestationSecurityLevel) } ?: "未提供")
+        val now = System.currentTimeMillis()
+        val root = data.certs.firstOrNull()?.issuer
+        val trusted = root == RootPublicKey.Status.GOOGLE || root == RootPublicKey.Status.GOOGLE_RKP || root == RootPublicKey.Status.KNOX || root == RootPublicKey.Status.OEM
+        val verdict = CertificateVerdict.evaluate(
+            data.certs.isNotEmpty() && data.certs.all { it.isSignatureValid }, trusted,
+            data.certs.any { it.revocation != null },
+            data.certs.all { it.cert.notBefore.time <= now && (it.cert.notAfter.time >= now || it.isLegacyExpiredAccepted) },
+            data.certs.any { it.isLegacyExpiredAccepted }, OfficialData.isFresh(),
+            att == null || att.attestationSecurityLevel == Attestation.KM_SECURITY_LEVEL_SOFTWARE || trust == null || !trust.isDeviceLocked || trust.verifiedBootState != 0,
+            data.certs.any { it.provisioningInfo?.lostDevice == true })
+        resultCard(verdict.title(), verdict.reason(), verdict.level())
+        val cert = card("证书")
+        row(cert, "密钥类型", if (data.hasRkpEvidence()) "RKP 远程配置" else "未发现 RKP 扩展")
+        row(cert, "信任根", fields.getString("根来源"))
+        row(cert, "签名", if (data.certs.all { it.isSignatureValid }) "通过" else "失败", if (data.certs.all { it.isSignatureValid }) R.color.dash_accent else R.color.dash_error)
+        row(cert, "有效期", when { data.certs.any { it.isLegacyExpiredAccepted } -> "旧证书兼容"; data.certs.any { it.cert.notAfter.time < now || it.cert.notBefore.time > now } -> "异常"; else -> "正常" })
+        row(cert, "撤销检查", fields.getString("撤销检查"))
+        rkpExpiry(data)?.let { row(cert, "RKP 到期", date(it), if (it - now < 7L * 86400000) R.color.dash_warning else R.color.dash_text) }
+        val device = card("设备")
+        row(device, "证明级别", att?.let { Attestation.securityLevelToString(it.attestationSecurityLevel) } ?: "未提供")
         row(device, "启动锁", trust?.let { if (it.isDeviceLocked) "已锁定" else "未锁定" } ?: "未提供")
-        row(device, "Verified Boot", trust?.let { RootOfTrust.verifiedBootStateToString(it.verifiedBootState) } ?: "未提供")
+        row(device, "启动状态", trust?.let { RootOfTrust.verifiedBootStateToString(it.verifiedBootState) } ?: "未提供")
         row(device, "安全补丁", att?.teeEnforced?.osPatchLevel?.toString() ?: "未提供")
-        rkpExpiry(data)?.let {
-            val days = DiagnosticPolicy.expiry(System.currentTimeMillis(), it)
-            card("证书轮换与到期", "$days · ${date(it)}\n基于当前证书快照；正常轮换不是异常，过期也不等于已经撤销。", tint = if (it - System.currentTimeMillis() < 7L * 86400000) R.color.dash_warning else R.color.dash_text)
-        }
-        val actions = card("常用操作")
-        button(actions, "重新检测") { source = "本机生成"; model.load() }
-        button(actions, "导出脱敏报告", true) { exportReport(true) }
-        button(actions, "导入公开证书链", true) { importChain.launch("*/*") }
-        card("了解这份结果", "配置扩展是识别 RKP 的证据；没有该扩展不能反推为工厂密钥。证书颁发近似数不是使用人数。", { message("结果说明", data.rkpSummary) })
+        val actionRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        val refreshButton = MaterialButton(this).apply { text = "重新检测"; cornerRadius = dp(14); setOnClickListener { source = "本机生成"; model.load() } }
+        val detailButton = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply { text = "查看证书"; cornerRadius = dp(14); setOnClickListener { navigation.selectedItemId = 2 } }
+        actionRow.addView(refreshButton, LinearLayout.LayoutParams(0, dp(52), 1f).apply { marginEnd = dp(8) })
+        actionRow.addView(detailButton, LinearLayout.LayoutParams(0, dp(52), 1f))
+        page.addView(actionRow)
+        page.addView(text(if (updating) "数据更新中…" else "${OfficialData.source()} · ${if (OfficialData.fetchedAt() == 0L) "未更新" else date(OfficialData.fetchedAt())}", 11, false, R.color.dash_muted).apply { setPadding(0, dp(12), 0, 0) })
     }
     private fun chain() {
         heading("证书链", "从信任根到目标密钥 · 每条连接单独验证")
         val data = current
         if (data == null || loading) { card("暂无可显示的链", "请先完成检测或导入。"); return }
-        card("选定路径 · ${data.certs.size} 张证书", "按证书内容去重、发行者名称及签名构建。不把两条独立路径拼接。")
+        
         data.certs.forEachIndexed { index, info ->
             val role = when { index == 0 -> "信任根"; info.attestation != null -> if (index == data.certs.lastIndex) "目标证明" else "App Attest Key"; info.provisioningInfo != null -> "RKP 配置扩展"; else -> "中间证书" }
             val label = if (index == 0) "根公钥" else "由上一级签发"
@@ -257,8 +291,10 @@ open class DashboardActivity : AppCompatActivity() {
             if (index < data.certs.lastIndex) page.addView(text("│   ${if (data.certs[index + 1].isSignatureValid) "下一连接签名通过" else "下一连接失败"}", 12, false, R.color.dash_muted).apply { setPadding(dp(18), 0, 0, dp(12)) })
         }
         val actions = card("导出与检查")
-        button(actions, "保存公开证书链（PKCS#7）", true) { saveChain.launch("key-attestation.p7b") }
-        button(actions, "完整报告（可能含设备标识）", true) { exportReport(false) }
+        button(actions, "导入证书", true) { importChain.launch("*/*") }
+        button(actions, "脱敏报告", true) { exportReport(true) }
+        button(actions, "保存证书链（PKCS#7）", true) { saveChain.launch("key-attestation.p7b") }
+        button(actions, "完整报告（含标识）", true) { exportReport(false) }
         button(actions, "打开高级字段检查器", true) { startActivity(Intent(this, HomeActivity::class.java)) }
     }
     private fun certificateDetails(info: CertificateInfo): String = buildString {
@@ -332,7 +368,7 @@ open class DashboardActivity : AppCompatActivity() {
             })
         }
         if (list.length() > 0) {
-            val b = card("管理记录", "记录包含证书指纹，仍可能具有可关联性；不自动上传。")
+            val b = card("管理记录")
             button(b, "清空全部记录", true) { confirm("清空记录？", "仅删除本地摘要，不删除系统密钥。") { prefs.edit().remove("snapshots").apply(); render() } }
         }
     }
@@ -345,33 +381,33 @@ open class DashboardActivity : AppCompatActivity() {
         parent.addView(s); parent.addView(text(description, 12, false, R.color.dash_muted).apply { setPadding(0, 0, 0, dp(12)) })
     }
     private fun settings() {
-        heading("设置与数据", "清楚知道数据从哪里来、保存在哪里。")
-        val data = card("官方信任数据", "${OfficialData.source()}\n${if (OfficialData.isFresh()) "24 小时内在线更新" else "当前在线新鲜度未确认"}")
+        heading("设置", "清楚知道数据从哪里来、保存在哪里。")
+        val data = card("信任数据", "${OfficialData.source()} · ${if (OfficialData.isFresh()) "有效" else "过期 / 未更新"}")
         row(data, "信任根公钥", OfficialData.rootCount().toString())
         row(data, "撤销条目", OfficialData.entryCount().toString())
         row(data, "上次拉取", if (OfficialData.fetchedAt() == 0L) "未在线确认" else date(OfficialData.fetchedAt()))
         button(data, if (updating) "更新中…" else "更新官方数据") { refresh(true) }
-        button(data, "来源、差异与错误详情", true) { message("数据来源与更新记录", OfficialData.describe()) }
+        button(data, "更新详情", true) { message("数据来源与更新记录", OfficialData.describe()) }
         button(data, "导出公开数据包", true) {
             runCatching { pendingText = OfficialData.exportBundle(); saveText.launch("official-trust-data.json") }.onFailure { toast(it.message ?: "导出失败") }
         }
         button(data, "导入离线数据包", true) {
             confirm("离线导入限制", "只接受根集合与本机已知官方根一致的数据包。撤销条目保守合并，不能删除已有条目；导入不等于官方在线确认。") { importData.launch("*/*") }
         }
-        toggle(data, "启动时检查更新", "仅从固定 Google HTTPS 接口下载公开数据；不上传设备证明。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
-        val privacy = card("本地与隐私")
-        toggle(privacy, "保留本地历史", "最多 30 次摘要；关闭后停止新增，已有记录可在记录页清空。系统备份已关闭。", prefs.getBoolean("history", true)) { prefs.edit().putBoolean("history", it).apply() }
-        toggle(privacy, "证书临期通知", "针对上次本机 RKP 快照，7 天内提醒。约每 12 小时检查，受系统调度限制，不联网检测当前证书。", prefs.getBoolean("reminders", false)) {
+        toggle(data, "启动时检查更新", "优先 jsDelivr 镜像，失败尝试 Google，再回退本地缓存。", prefs.getBoolean("auto_update", true)) { prefs.edit().putBoolean("auto_update", it).apply() }
+        val privacy = card("隐私与提醒")
+        toggle(privacy, "保留本地历史", "最多 30 条，可随时关闭或清空。", prefs.getBoolean("history", true)) { prefs.edit().putBoolean("history", it).apply() }
+        toggle(privacy, "证书临期通知", "上次记录的 RKP 证书在 7 天内到期时提醒。", prefs.getBoolean("reminders", false)) {
             if (it && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             else { prefs.edit().putBoolean("reminders", it).apply(); ExpiryWorker.schedule(this, it) }
         }
-        toggle(privacy, "严格有效期模式", "关闭时仅对固定 Google 旧根、已识别工厂路径且无 RKP 配置扩展的过期证书采用兼容策略；未知链、尚未生效证书与 RKP 不放宽。", prefs.getBoolean("strict_expiry", false)) {
+        toggle(privacy, "严格有效期模式", "开启后不使用旧工厂证书过期兼容策略。", prefs.getBoolean("strict_expiry", false)) {
             prefs.edit().putBoolean("strict_expiry", it).apply(); current?.revalidate(); render()
         }
         val mode = card("检测选项")
         if (::model.isInitialized) {
-            if (model.hasStrongBox) toggle(mode, "优先使用 StrongBox", "变更后重新检测生效；TEE 与 StrongBox 结果不应直接等同。", model.preferStrongBox) { model.preferStrongBox = it }
-            if (model.hasAttestKey) toggle(mode, "使用 App Attest Key", "保留独立路径与安全用途检查。", model.preferAttestKey) { model.preferAttestKey = it }
+            if (model.hasStrongBox) toggle(mode, "优先使用 StrongBox", "重新检测后生效。", model.preferStrongBox) { model.preferStrongBox = it }
+            if (model.hasAttestKey) toggle(mode, "使用 App Attest Key", "使用应用自建证明密钥。", model.preferAttestKey) { model.preferAttestKey = it }
         }
         button(mode, "高级工具与完整字段", true) { startActivity(Intent(this, HomeActivity::class.java)) }
         button(mode, "外观：跟随系统 / 浅色 / 深色", true) {
@@ -380,7 +416,7 @@ open class DashboardActivity : AppCompatActivity() {
                 prefs.edit().putInt("theme", value).apply(); delegate.localNightMode = value
             }.show()
         }
-        card("关于密钥认证", "${BuildConfig.VERSION_NAME}\n非 Google 或上游官方发行。Apache-2.0 开源。\n本版本不包含服务端挑战验证，也不提供设备安全评分。", {
+        card("关于", "${BuildConfig.VERSION_NAME}", {
             message("关于与限制", "上游：vvb2060/KeyAttestation\n社区仓库：suhuli/miyaorenzheng\n\n本机受控环境可能篡改解析和显示。最终安全决定应在独立可信环境中验证。\n原有主动 RKP 工具需要 Shizuku，并在确认后向指定服务提交配置数据；普通识别无需该操作。")
         })
     }
