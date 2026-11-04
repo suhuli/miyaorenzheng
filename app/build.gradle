@@ -10,15 +10,6 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-def gitCommitCount
-try {
-    gitCommitCount = providers.exec {
-        commandLine("git", "rev-list", "--count", "HEAD")
-    }.standardOutput.asText.get().toInteger()
-} catch (ignored) {
-    gitCommitCount = 1
-}
-
 def properties = new Properties()
 def local = project.rootProject.file("local.properties")
 if (local.exists()) {
@@ -32,7 +23,7 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 35
-        versionCode = gitCommitCount + 1
+        versionCode = 199
         versionName = '2.0.1-community'
         applicationIdSuffix = '.community.fix'
         resourceConfigurations += ['en', 'zh-rCN', 'zh-rTW', 'pt-rBR']
