@@ -19,6 +19,9 @@ public final class OfficialData {
     public static final String ROOT_URL = "https://android.googleapis.com/attestation/root";
     public static final String STATUS_URL = "https://android.googleapis.com/attestation/status";
     private static final long MAX_AGE = 24L * 60 * 60 * 1000;
+    static final int CONNECT_TIMEOUT_MS = 30_000;
+    static final int READ_TIMEOUT_MS = 30_000;
+    static final int SOURCE_WAIT_MS = 30_000;
     private static final int MAX_BYTES = 8 * 1024 * 1024;
     private static volatile Snapshot current;
     private static volatile String lastError = "";
@@ -118,7 +121,7 @@ public final class OfficialData {
     }
     private static String download(String url) throws IOException {
         HttpsURLConnection c = (HttpsURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(4000); c.setReadTimeout(4000);
+        c.setConnectTimeout(CONNECT_TIMEOUT_MS); c.setReadTimeout(READ_TIMEOUT_MS);
         c.setInstanceFollowRedirects(false);
         c.setUseCaches(false);
         c.setRequestProperty("Accept", "application/json");
@@ -149,7 +152,7 @@ public final class OfficialData {
             .append((now-phaseNanos)/1_000_000L).append("ms\n");
         phase = value; phaseNanos = now;
     }
-    // A source gets 8s of network waiting; fallback gets a separate 8s. Workers only
+    // A source gets 30s of network waiting; fallback gets a separate 30s. Workers only
     // return strings: a late/uncancellable DNS result can never publish trust data.
     private static final class BudgetDownloader implements Downloader {
         private final Downloader delegate;
@@ -173,9 +176,9 @@ public final class OfficialData {
         }
     }
     static boolean refresh(Context context, boolean force, Downloader downloader) {
-        return refresh(context,force,downloader,8000);
+        return refresh(context,force,downloader,SOURCE_WAIT_MS);
     }
-    // Short budgets are injectable in tests; production always uses 8s per source.
+    // Short budgets are injectable in tests; production always uses 30s per source.
     static boolean refresh(Context context, boolean force, Downloader downloader, long budgetMillis) {
         long requestedAt=System.nanoTime();
         synchronized (UPDATE_LOCK) {
@@ -325,6 +328,7 @@ public final class OfficialData {
         return "顺序：" + priorityLabel(context) + "\nMirror: " + MIRROR_MANIFEST + "\n信任模式：完全信任指定仓库；镜像无签名，可自动更新根公钥集合\nRoots: " + ROOT_URL + "\nRevocation: " + STATUS_URL + "\nSource: " + s.source()
             + "\n官方抓取时间: " + (s.fetchedAt() == 0 ? "Bundled; not online-verified" : new Date(s.fetchedAt()))
             + "\nFresh (<24h): " + isFresh() + "\nRoot keys: " + s.keys().size()
+            + "\n网络等待预算：每来源 30 秒；两来源最多约 60 秒，不含本地校验/写盘/调度"
             + "\n更新状态：" + updateStatus() + "\n阶段耗时：\n" + timing
             + "\n更新差异：" + lastChange
             + "\nLast update error: " + (lastError.isEmpty() ? "None" : lastError)

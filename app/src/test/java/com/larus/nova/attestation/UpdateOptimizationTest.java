@@ -17,6 +17,11 @@ public class UpdateOptimizationTest {
         var b=new JSONObject(OfficialData.exportBundle());String r=b.getJSONArray("roots").toString(),s=b.getJSONObject("status").toString();
         return url->{count.incrementAndGet();if(url.equals(OfficialData.ROOT_URL))return r;if(url.equals(OfficialData.STATUS_URL))return s;throw new IOException("offline mirror");};
     }
+    @Test public void productionTimeoutsAreThirtySecondsPerSource() {
+        assertEquals(30000,OfficialData.CONNECT_TIMEOUT_MS);
+        assertEquals(30000,OfficialData.READ_TIMEOUT_MS);
+        assertEquals(30000,OfficialData.SOURCE_WAIT_MS);
+    }
     @Test public void automaticSuccessIsThrottledWithoutChangingDataAge() throws Exception {
         var n=new AtomicInteger();var d=official(n);assertTrue(OfficialData.refresh(app(),false,d));long age=OfficialData.fetchedAt();
         assertTrue(OfficialData.refresh(app(),false,d));assertEquals(2,n.get());assertEquals(age,OfficialData.fetchedAt());assertTrue(OfficialData.updateStatus().contains("未联网"));
